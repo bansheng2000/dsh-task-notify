@@ -1,0 +1,21 @@
+- insert:
+    - id: task-notify
+      name: dsh-task-notify
+      config:
+        rules:
+          enabled: true
+          channel: weixin
+          format: plain
+          skipSubagents: true
+          # 未绑定时的占位：botId 留空 = 该工作区不推送（跳过后计数，见 /_task-notify/status）
+          target:
+            botId: ""
+            targetId: ""
+          # 按工作区覆盖目标。键可以是完整 cwd，也可以只写工作区目录名。
+          # workspaces:
+          #   ziyongchajian:
+          #     botId: wx_0123456789abcdef01234567
+          #     targetId: tgt_1a2b3c4d5e6f7890
+          #   "E:/文档/deepseek-harness/default-workspace":
+          #     botId: wx_0123456789abcdef01234567
+          #     targetId: tgt_1a2b3c4d5e6f7890

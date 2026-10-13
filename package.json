@@ -1,0 +1,52 @@
+{
+  "name": "dsh-task-notify",
+  "version": "0.1.0",
+  "description": "任务完成 / 失败 / 取消时通过 dsh-im 推一条微信通知（覆盖全部工作区，会话级去重）。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "cordis.patch.yml",
+    "README.md"
+  ],
+  "keywords": [
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "notify",
+    "weixin",
+    "dsh-im"
+  ],
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "dependencies": {
+    "@deepseek-ai/schemastery": "^3.18.4"
+  },
+  "peerDependencies": {
+    "@deepseek-ai/schemastery": "^3.18.4"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/schemastery": {
+      "optional": true
+    }
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "cordis.patch.yml"
+    },
+    "engines": {
+      "dsh": ">=0.1.7-rc.1"
+    },
+    "compatibility": {
+      "dshReleases": {
+        "0.1.7-rc.1": "compatible"
+      }
+    }
+  }
+}
