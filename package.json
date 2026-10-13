@@ -1,7 +1,7 @@
 {
   "name": "dsh-task-notify",
-  "version": "0.1.0",
-  "description": "任务完成 / 失败 / 取消时通过 dsh-im 推一条微信通知（覆盖全部工作区，会话级去重）。",
+  "version": "0.2.0",
+  "description": "任务完成 / 失败 / 取消时通过 dsh-im 推通知，支持多渠道多账户扇出（覆盖全部工作区，会话级去重）。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
@@ -18,7 +18,7 @@
     "dsh",
     "dsh-plugin",
     "notify",
-    "weixin",
+    "multichannel",
     "dsh-im"
   ],
   "license": "MIT",

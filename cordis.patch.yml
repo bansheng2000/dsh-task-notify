@@ -4,18 +4,27 @@
       config:
         rules:
           enabled: true
-          channel: weixin
           format: plain
           skipSubagents: true
-          # 未绑定时的占位：botId 留空 = 该工作区不推送（跳过后计数，见 /_task-notify/status）
-          target:
-            botId: ""
-            targetId: ""
-          # 按工作区覆盖目标。键可以是完整 cwd，也可以只写工作区目录名。
+          # 投递目标列表：一条通知扇出到全部目标。三者都取自 dsh-im：
+          #   channel  = dsh-im 的渠道名（weixin / telegram / slack / email / ...）
+          #   botId    = dsh-im 里的「账户」，形如 wx_<24 hex>
+          #   targetId = dsh-im 里的收件目标，形如 tgt_<16 hex>
+          # 留空 = 未绑定，跳过并计数（见 /_task-notify/status）。
+          targets:
+            - channel: weixin
+              botId: ""
+              targetId: ""
+            # - channel: telegram
+            #   botId: ""
+            #   targetId: ""
+          # 按工作区覆盖目标列表。键可以是完整 cwd，也可以只写工作区目录名。
           # workspaces:
           #   ziyongchajian:
-          #     botId: wx_0123456789abcdef01234567
-          #     targetId: tgt_1a2b3c4d5e6f7890
+          #     - channel: weixin
+          #       botId: wx_0123456789abcdef01234567
+          #       targetId: tgt_1a2b3c4d5e6f7890
           #   "E:/文档/deepseek-harness/default-workspace":
-          #     botId: wx_0123456789abcdef01234567
-          #     targetId: tgt_1a2b3c4d5e6f7890
+          #     - channel: slack
+          #       botId: sl_0123456789abcdef01234567
+          #       targetId: tgt_0f1e2d3c4b5a6978
