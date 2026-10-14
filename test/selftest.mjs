@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 
 const mod = await import("../lib/index.js");
-const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, formatMessage, statusEnabled } = mod;
+const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, formatMessage, statusEnabled, storedRules, workspaceAllowed, FIELD_DEFAULTS } = mod;
 
 
 /** 造一个最小 ctx：只存 on / inject，dshIm 与 logger 可注入。 */
@@ -835,4 +835,69 @@ const QUESTIONS = [
   assert.ok(body.length <= 300, "正文 " + body.length + " 字，超了上限");
   assert.ok(body.endsWith("…"), body.slice(-20));
 }
+// 48) storedRules：卡片靠它读回「配置里存着什么」，半填的行不能丢
+{
+  const half = { rules: { targets: [{ channel: "weixin", botId: "wx_1", targetId: "" }] } };
+  assert.equal(storedRules(half).targets.length, 1, "targetId 还空着的行也要读得回来（丢了就是「点 + 账户没反应」）");
+  assert.deepEqual(storedRules(half).targets[0], { channel: "weixin", botId: "wx_1", targetId: "", enabled: true });
+  assert.equal(targetsOf(half.rules.targets).length, 0, "投递路径照旧丢弃半填的行");
+  assert.equal(storedRules({}).enabled, true, "缺省开");
+  assert.deepEqual(storedRules({}).onlyWorkspaces, []);
+  assert.deepEqual(storedRules({}).fields, FIELD_DEFAULTS);
+  const ws = storedRules({ rules: { workspaces: { a: [{ channel: "weixin", botId: "wx_1", targetId: "" }] } } });
+  assert.equal(ws.workspaces.a.length, 1, "工作区覆盖里的半填行也一样");
+}
+
+// 49) onlyWorkspaces：空=全部；命中目录名或完整 cwd 才放行
+{
+  assert.equal(workspaceAllowed({ onlyWorkspaces: [] }, "E:/x/alpha"), true, "不勾=全部工作区都发");
+  assert.equal(workspaceAllowed({ onlyWorkspaces: ["alpha"] }, "E:/x/alpha"), true);
+  assert.equal(workspaceAllowed({ onlyWorkspaces: ["E:/x/alpha"] }, "E:/x/alpha"), true, "完整 cwd 也认");
+  assert.equal(workspaceAllowed({ onlyWorkspaces: ["beta"] }, "E:/x/alpha"), false);
+  assert.deepEqual(rulesOf({ rules: { onlyWorkspaces: [" alpha ", "", 7] } }).onlyWorkspaces, ["alpha"], "非串与空串丢掉");
+}
+
+// 50) fields：正文按勾选增减
+{
+  const full = formatMessage({
+    label: "✅ 任务完成", title: "标题", cwd: "E:/x/alpha", phrase: "报错",
+    sessionId: "session-1", at: "2026-10-14T00:00:00.000Z", fields: { sessionId: true, time: true },
+  });
+  assert.equal(full.split(NL)[0], "✅ 任务完成 | task-notify | 标题");
+  assert.ok(full.includes("工作区: alpha"), full);
+  assert.ok(full.includes("原因: 报错"), full);
+  assert.ok(full.includes("会话: session-1"), full);
+  assert.ok(full.includes("时间: 2026-10-14T00:00:00.000Z"), full);
+  assert.equal(
+    formatMessage({ label: "✅", title: "", cwd: "E:/x/alpha", phrase: "", fields: { title: false, workspace: false, reason: false } }),
+    "✅ | task-notify | alpha",
+    "全关只剩首行",
+  );
+  assert.equal(formatMessage({ label: "✅", cwd: "", phrase: "" }), ["✅ | task-notify | unknown", "工作区: unknown"].join(NL), "缺省仍带工作区行");
+}
+
+// 51) onlyWorkspaces 真的拦投递（计入 filteredWorkspace，不是静默丢），并把见过的工作区报给卡片
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, ctx._setConfig(binding({ onlyWorkspaces: ["alpha"] })));
+  ctx._emit("session/event", session("s1", "E:/x/beta"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  assert.equal(im.calls.length, 0, "不在白名单的工作区不发");
+  const body = await readStatus(ctx, "GET");
+  assert.equal(body.filteredWorkspace, 1);
+  assert.equal(body.observed.length, 1, "见过的工作区要记下来，卡片才有东西可勾");
+  assert.equal(body.observed[0].name, "beta");
+  assert.equal(body.observed[0].count, 1);
+
+  ctx._emit("session/event", session("s2", "E:/x/alpha"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  assert.equal(im.calls.length, 1, "白名单里的照发");
+  assert.ok(im.calls[0].text.includes("工作区: alpha"), im.calls[0].text);
+
+  const describe = await callBridge(ctx, BRIDGE + "/describe");
+  assert.equal(describe.body.value.observed.length, 2, "桥的 describe 也要给见过的工作区");
+  assert.deepEqual(describe.body.value.observed.map((item) => item.name).sort(), ["alpha", "beta"], "两个工作区都在（次数相同按见识先后）");
+}
+
 console.log("dsh-task-notify selftest: ok");

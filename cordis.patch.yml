@@ -16,6 +16,16 @@
             max-tokens: true
             interrupted: true
             forked: true
+          # 只给这些工作区发通知（完整 cwd 或工作区目录名）。留空 = 全部工作区都发；
+          # 非空则先按工作区拦一道，被拦下的计到 /_task-notify/status 的 filteredWorkspace。
+          onlyWorkspaces: []
+          # 通知正文带哪些字段。全关也仍有一条首行（状态 | task-notify | 标题/工作区）。
+          fields:
+            title: true
+            workspace: true
+            reason: true
+            sessionId: false
+            time: false
           # 投递目标列表：一条通知扇出到全部目标。三者都取自 dsh-im：
           #   channel  = dsh-im 的渠道名（weixin / telegram / slack / email / ...）
           #   botId    = dsh-im 里的「账户」，形如 wx_<24 hex>

@@ -21,7 +21,13 @@ const DESCRIBED = {
       { enabled: false, channel: "telegram", botId: "tg_0000000000000000", targetId: "" },
     ],
     workspaces: { ziyongchajian: [{ channel: "weixin", botId: "wx_0123456789abcdef01234567", targetId: "tgt_1a2b3c4d5e6f7890" }] },
+    fields: { title: true, workspace: true, reason: true, sessionId: false, time: false },
+    onlyWorkspaces: ["alpha"],
   },
+  observed: [
+    { name: "alpha", cwd: "E:/p/alpha", count: 3, last: "session-1" },
+    { name: "beta", cwd: "E:/p/beta", count: 1, last: "session-2" },
+  ],
   dshImInstalled: true,
   accounts: [{ botId: "wx_0123456789abcdef01234567", channel: "weixin" }],
   channels: [{ channel: "weixin", accounts: 1, botIds: ["wx_0123456789abcdef01234567"] }],
@@ -115,7 +121,7 @@ assert.equal(base.formatWorkspaces(null), "");
 const tree = base.NotifyCard({});
 const nodes = walk(tree);
 const boxes = nodes.filter((node) => node.type === "input" && node.props?.type === "checkbox");
-assert.equal(boxes.length, 1 + 7 + 2 + 2, "总开关 + 七个状态 + 跳过子代理 + 待答问题 + 每个收件目标一个启用勾");
+assert.equal(boxes.length, 1 + 7 + 2 + 2 + 5 + 2, "总开关 + 七个状态 + 跳过子代理 + 待答问题 + 每个收件目标一个启用勾 + 五个正文字段 + 两个见过的工作区");
 assert.equal(boxes[0].props.checked, true, "总开关跟着 enabled");
 assert.deepEqual(
   boxes.slice(1, 8).map((node) => node.props.checked),
@@ -196,6 +202,44 @@ try {
   assert.match(html.message, /401/);
 } finally {
   globalThis.fetch = realFetch;
+}
+
+// 10) 正文可配（「通知里包含」）+ 工作区可勾（「通知哪些工作区」）：勾一下就要写回配置
+const fieldBoxes = boxes.slice(10, 15);
+assert.deepEqual(fieldBoxes.map((node) => node.props.checked), [true, true, true, false, false], "字段缺省：标题/工作区/原因勾上，会话 id 与时间不勾");
+const wsBoxes = boxes.slice(15, 17);
+assert.deepEqual(wsBoxes.map((node) => node.props.checked), [true, false], "工作区勾选跟着 onlyWorkspaces（只勾了 alpha）");
+
+let posted = null;
+const realFetchMutate = globalThis.fetch;
+globalThis.fetch = (url, init) => { posted = JSON.parse(init.body); return Promise.resolve({ status: 200, text: async () => JSON.stringify({ ok: true, value: DESCRIBED }) }); };
+try {
+  fieldBoxes[3].props.onChange({ target: { checked: true } });
+  assert.equal(posted.ops[0].path.join("."), "rules.fields", "勾字段写 rules.fields");
+  assert.equal(posted.ops[0].value.sessionId, true, "勾上会话 id");
+  assert.equal(posted.ops[0].value.title, true, "其它字段原样保留");
+
+  posted = null;
+  wsBoxes[1].props.onChange({ target: { checked: true } });
+  assert.deepEqual(posted.ops[0].value, ["alpha", "beta"], "勾上工作区写 onlyWorkspaces（目录名）");
+
+  posted = null;
+  wsBoxes[0].props.onChange({ target: { checked: false } });
+  assert.deepEqual(posted.ops[0].value, [], "取消勾选就把它摘掉");
+
+  // 11) 「+ 账户」按钮：点一下必须真的发 mutate，且带上 targetId 为空的新行
+  const addBtn = nodes.find((node) => node.type === "button" && String(node.props?.children).startsWith("+ "));
+  assert.ok(addBtn, "在线账户旁边要有「+ 渠道 · …」按钮");
+  posted = null;
+  addBtn.props.onClick();
+  assert.ok(posted, "点「+ 账户」必须发一次 mutate");
+  const rows = posted.ops[0].value;
+  assert.equal(rows.length, DESCRIBED.config.targets.length + 1, "新行追加在列表末尾");
+  assert.deepEqual(rows[rows.length - 1], { enabled: true, channel: "weixin", botId: "wx_0123456789abcdef01234567", targetId: "" }, "新行允许 targetId 为空，服务端不能把它回填成 []");
+  // patch 开头会 setError(null) 清错误；留下字符串就是真报错了。
+  assert.equal(base.__sets[1].args[0] ?? null, null, "点击不能报错（静默无反应就是死在这条路径上）");
+} finally {
+  globalThis.fetch = realFetchMutate;
 }
 
 console.log("dsh-task-notify client selftest: ok");
