@@ -703,4 +703,136 @@ async function readStatus(ctx, method = "GET") {
   });
 }
 
+/** 发一次 user-questions/request，返回 next() 的值（验证没抢答）。 */
+function ask(ctx, request) {
+  let handed = "not-called";
+  ctx._emit("user-questions/request", request, () => {
+    handed = "next-returned";
+    return "answered-by-host";
+  });
+  return () => handed;
+}
+
+const QUESTIONS = [
+  {
+    id: "q1",
+    header: "选一个",
+    question: "要\n 要哪个分支？",
+    options: [
+      { label: "A 方案", description: "最省事" },
+      { label: "B 方案", description: "更稳" },
+    ],
+  },
+];
+
+// 41) 待答问题：推一条 ❓ 通知（题干压空白 + 选项），并把回答权原样交回宿主
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service, sessionTitle: { get: () => ({ title: "任务完成通知" }) } });
+  apply(ctx, ctx._setConfig(binding()));
+  const handed = ask(ctx, { agent: { session: session("s1", "E:/x/ziyongchajian") }, questions: QUESTIONS, turn: 4 });
+  assert.equal(handed(), "next-returned", "必须继续 next()，不能自己回答");
+  await settle();
+  assert.equal(im.calls.length, 1);
+  const text = im.calls[0].text;
+  assert.ok(text.startsWith("❓ 需要你选择 | task-notify | 任务完成通知"), text);
+  assert.ok(text.includes("待选: 要 要哪个分支？"), text);
+  assert.ok(text.includes("  - A 方案"), text);
+  assert.ok(text.includes("  - B 方案"), text);
+  assert.ok(!text.includes("原因:"), "问题通知不该编原因行: " + text);
+  const status = await readStatus(ctx);
+  assert.equal(status.questions, 1);
+  assert.equal(status.notifyQuestions, true);
+}
+
+// 42) notifyQuestions 关掉：不推，但 next() 照走（宿主照样能弹问题）
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, ctx._setConfig(binding({ notifyQuestions: false })));
+  const handed = ask(ctx, { agent: { session: session("s1", "E:/x/a") }, questions: QUESTIONS, turn: 1 });
+  assert.equal(handed(), "next-returned");
+  await settle();
+  assert.equal(im.calls.length, 0);
+  assert.equal((await readStatus(ctx)).questions, 0);
+}
+
+// 43) 同会话同轮只推一次；换了轮号会再推；next() 每次都走
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, ctx._setConfig(binding()));
+  const req = { agent: { session: session("s1", "E:/x/a") }, questions: QUESTIONS };
+  assert.equal(ask(ctx, { ...req, turn: 2 })(), "next-returned");
+  assert.equal(ask(ctx, { ...req, turn: 2 })(), "next-returned");
+  assert.equal(ask(ctx, { ...req, turn: 3 })(), "next-returned");
+  await settle();
+  assert.equal(im.calls.length, 2);
+}
+
+// 44) subagent 默认不推；关掉 skipSubagents 后推
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, ctx._setConfig(binding()));
+  const sub = { agent: { session: session("sub", "E:/x/a", { delegationDepth: 1 }) }, questions: QUESTIONS, turn: 1 };
+  assert.equal(ask(ctx, sub)(), "next-returned");
+  await settle();
+  assert.equal(im.calls.length, 0);
+
+  const im2 = fakeIm();
+  const ctx2 = makeCtx({ dshIm: im2.service });
+  apply(ctx2, ctx2._setConfig(binding({ skipSubagents: false })));
+  assert.equal(ask(ctx2, sub)(), "next-returned");
+  await settle();
+  assert.equal(im2.calls.length, 1);
+}
+
+// 45) 空问题 / 未知形态：一条都不推，也不占计数，但 next() 照样走
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, ctx._setConfig(binding()));
+  const base = { agent: { session: session("s1", "E:/x/a") }, turn: 1 };
+  assert.equal(ask(ctx, { ...base, questions: [] })(), "next-returned");
+  assert.equal(ask(ctx, { ...base, questions: undefined })(), "next-returned");
+  assert.equal(ask(ctx, { ...base, questions: "not-an-array" })(), "next-returned");
+  assert.equal(ask(ctx, { ...base, questions: [{ options: [{ label: "A" }] }] })(), "next-returned");
+  await settle();
+  assert.equal(im.calls.length, 0);
+  assert.equal((await readStatus(ctx)).questions, 0);
+}
+
+// 46) 没绑目标的问题：跳过不发送；enabled:false 也一样
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, ctx._setConfig({ rules: {} }));
+  assert.equal(ask(ctx, { agent: { session: session("s1", "E:/x/a") }, questions: QUESTIONS, turn: 1 })(), "next-returned");
+  await settle();
+  assert.equal(im.calls.length, 0);
+
+  const off = fakeIm();
+  const ctx2 = makeCtx({ dshIm: off.service });
+  apply(ctx2, ctx2._setConfig(binding({ enabled: false })));
+  assert.equal(ask(ctx2, { agent: { session: session("s1", "E:/x/a") }, questions: QUESTIONS, turn: 1 })(), "next-returned");
+  await settle();
+  assert.equal(off.calls.length, 0);
+}
+
+// 47) 问题文本超长：整块截断加省略号，别把聊天刷屏
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, ctx._setConfig(binding()));
+  const long = [
+    { question: "请确认接下来的操作范围，".repeat(30), options: [{ label: "继续" }] },
+  ];
+  assert.equal(ask(ctx, { agent: { session: session("s1", "E:/x/a") }, questions: long, turn: 1 })(), "next-returned");
+  await settle();
+  assert.equal(im.calls.length, 1);
+  const body = im.calls[0].text.split(NL).slice(2).join(NL);
+  assert.ok(body.length <= 300, "正文 " + body.length + " 字，超了上限");
+  assert.ok(body.endsWith("…"), body.slice(-20));
+}
 console.log("dsh-task-notify selftest: ok");

@@ -9,6 +9,7 @@
 - **文案**：首行「状态 | task-notify | 会话标题」，正文逐行「字段: 值」；失败 / 取消补一行「原因: ...」。
 - **未绑定 / 账户未连接**：跳过 + 记日志 + 计数，不报错打断监听。
 - **去重**：会话级——同一 `sessionId` + 同一结束原因只推一次（整批算一次，不是每个目标一次）。
+- **待答问题也提示**：会话调 `ask_user_question` 要你做选择时推一条 ❓ 通知（只旁听不抢答，回答权原样交回 Web / dsh-im），单独用 `notifyQuestions` 开关控制。
 - **设置里可改**：插件自带设置卡片（设置 → 插件 → dsh-task-notify → 行配置），开关、状态过滤、目标列表、工作区规则都能改，**落盘即生效，不用重启**。
 
 ## 通知长什么样
@@ -42,6 +43,23 @@
 | `interrupted` | ⚠️ 任务中断 | 无 | `statuses.interrupted` |
 | `forked` | 🔀 任务已分叉 | 无 | `statuses.forked` |
 
+### 会话要你做选择时（`ask_user_question`）
+
+会话调 `ask_user_question` 抛出待答问题时，也推一条独立的通知，单独用 `notifyQuestions` 开关（默认开，不归 `statuses` 管）：
+
+```
+❓ 需要你选择 | task-notify | 微信文案微调
+工作区: ziyongchajian
+待选: 用哪个文案？
+  - 简洁版
+  - 详细版
+  - 先不改文案
+```
+
+只旁听不抢答：监听的是 cordis waterfall `user-questions/request`，插件打完招呼立刻 `return next()`，把回答权原样交给 Web 界面 / dsh-im 的回答器，绝不自己写答案。
+
+最多列 3 道题、每题前 6 个选项，整块超 300 字截断加 `…`——手机上刷一屏就够，别把微信刷爆。
+
 ## 配置
 
 插件不调 `ctx.settings.register()`，直接导出 `Config`；配置写在 loader 条目 `task-notify` 的 `config.rules` 下（见 `cordis.patch.yml`），也可被设置卡片覆盖。
@@ -52,6 +70,7 @@ config:
     enabled: true          # 总开关
     format: plain          # plain | markdown，所有目标共用
     skipSubagents: true    # 只报顶层任务，subagent 的轮次结束不推
+    notifyQuestions: true  # 会话要你做选择时（ask_user_question）也推一条
 
     # 每种结束原因一个开关，全开。关掉哪种就不再推哪种，
     # 被拦下的轮次计入 /_task-notify/status 的 filtered。
@@ -102,7 +121,7 @@ config:
 
 卡片上能改的东西与上面配置一一对应：
 
-- 总开关「启用通知」、七种结束原因的勾选、「跳过子代理」、消息格式；
+- 总开关「启用通知」、七种结束原因的勾选、「跳过子代理」、「会话要你选择时也提示」、消息格式；
 - 投递目标列表（增删改）：启用勾、通道下拉（括号里是该通道的账户数）、`botId`、`targetId`，「选收件人」按钮会列出该账户下 dsh-im 已有的收件目标让你点；
 - 工作区规则（每行一条 `名称=channel|botId|targetId`）；
 - 「刷新」重新读配置、「发测试通知」真发一条（不受状态开关影响，用来验证通道与账户是不是通的）；
@@ -158,7 +177,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 {
   "dsh": { "profile": { "bundles": ["...", "dsh-task-notify"] } },
   "dependencies": {
-    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.5.1"
+    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.6.0"
   }
 }
 ```
@@ -167,7 +186,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 >
 > | 规格 | 场景 | 说明 |
 > | --- | --- | --- |
-> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.5.1` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
+> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.6.0` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
 > | `github:bansheng2000/dsh-task-notify` | 追 `main` 最新提交 | pnpm 会走 `git ls-remote git+ssh://git@github.com/...`，没配 ssh key 的机器 exit 128。修法：`git config --global url."https://github.com/".insteadOf "git+ssh://git@github.com/"` |
 > | `file:E:/文档/deepseek-harness/dsh-task-notify` | 本机开发 | 必须**绝对正斜杠**路径，相对路径报 `ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND` |
 >
@@ -195,7 +214,7 @@ bundle 自带的 `cordis.patch.yml` 用 `- insert:` 创建 loader 条目，**不
 
 ```powershell
 cd C:\Users\12576\.dsh\profiles\desktop
-# tarball 规格：先把依赖里的版本号改掉（v0.5.1 → 新版本），再
+# tarball 规格：先把依赖里的版本号改掉（v0.6.0 → 新版本），再
 pnpm install
 # 裸 github: 规格跟 main，无需改任何东西
 pnpm update dsh-task-notify
@@ -208,7 +227,7 @@ pnpm update dsh-task-notify
 ```powershell
 # 1) 插件自检（不依赖 DSH 宿主）
 cd E:\文档\deepseek-harness\dsh-task-notify
-& "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\selftest.mjs   # 服务端，40 项
+& "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\selftest.mjs   # 服务端，47 项
 & "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\client.mjs     # 设置卡片（含工厂 return 值断言）
 # 期望：dsh-task-notify selftest: ok / dsh-task-notify client selftest: ok
 
@@ -224,6 +243,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 ```json
 {
   "ok": true, "active": true, "format": "plain", "skipSubagents": true,
+  "notifyQuestions": true,
   "statuses": { "completed": true, "error": true, "aborted": true, "blocked": true,
                 "max-tokens": true, "interrupted": true, "forked": true },
   "targets": [{ "channel": "weixin", "botId": "wx_...", "targetId": "tgt_...", "enabled": true }],
@@ -232,6 +252,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
   "channels": [{ "channel": "weixin", "accounts": 1, "botIds": ["wx_..."] }],
   "dshImInstalled": true,
   "seen": 12, "notified": 6, "failed": 0, "skippedUnbound": 3, "deduped": 1, "filtered": 0,
+  "questions": 2,
   "last": { "sessionId": "...", "turn": 3, "reason": "completed", "at": "..." }
 }
 ```
@@ -248,6 +269,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 | `notified` 涨但某个渠道没收到 | 单个目标失败不会影响其它目标，但只会在日志里留一条 warn（`send not accepted: ...` / `send failed: ...`，带 `code`）。按 `targetId` 搜日志定位是哪个目标。 |
 | 微信 notified 但没收到 | `{sent:true}` 只代表平台接口接受，不代表送达。微信主动投递还需要用户消息里携带过的 `context_token`；先给机器人发一条微信消息再触发。 |
 | 某个通道 / 账户不想收了 | 把那条目标 `enabled: false`（不用删配置）；全停用等于该工作区未绑定，`skippedUnbound` 会涨、日志写 `no enabled target bound`。 |
+| 会话要你选择时没收到通知 | `notifyQuestions` 被关了；subagent 默认也不推（`skipSubagents`）。看 `questions` 计数涨没涨——涨了说明事件到了，是没绑目标或账户不在线。 |
 | 通知太吵 | `skipSubagents: true` 过滤 subagent；`statuses` 里关掉不关心的类型（如 `forked: false`、`blocked: false`）；同会话同原因本来就只推一次。fork / 多轮会推多条，确需收敛可把去重键加上 turn。 |
 | `filtered` 涨但一条没收到 | `statuses` 把这种结束原因关了（`filtered` 数被开关拦下的轮次）。看 `statuses` 哪项是 `false`。 |
 | 某个工作区没通知、别的有 | 检查 `workspaces` 的键：先按完整 `cwd` 匹配、再按目录名匹配，两者都没命中才回落默认 `targets`。 |
@@ -265,6 +287,6 @@ lib/client.js      设置卡片（window.__ModuleLoader__.load 形态，挂 plug
 cordis.patch.yml   bundle patch（- insert: 创建 loader 条目 + 配置示例）
 package.json       main=lib/index.js, exports./client=lib/client.js, dsh.bundle.patch / dsh.client
 README.md          本文件
-test/selftest.mjs  服务端自检（40 项断言）
+test/selftest.mjs  服务端自检（47 项断言）
 test/client.mjs    设置卡片自检（假 window + 假 react，渲染成纯对象树断言）
 ```

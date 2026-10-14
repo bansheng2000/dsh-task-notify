@@ -14,6 +14,7 @@ const DESCRIBED = {
     enabled: true,
     format: "plain",
     skipSubagents: true,
+    notifyQuestions: true,
     statuses: { completed: true, error: true, aborted: false, blocked: true, "max-tokens": true, interrupted: true, forked: false },
     targets: [
       { enabled: true, channel: "weixin", botId: "wx_0123456789abcdef01234567", targetId: "tgt_1a2b3c4d5e6f7890" },
@@ -108,7 +109,7 @@ assert.equal(base.formatWorkspaces(null), "");
 const tree = base.NotifyCard({});
 const nodes = walk(tree);
 const boxes = nodes.filter((node) => node.type === "input" && node.props?.type === "checkbox");
-assert.equal(boxes.length, 1 + 7 + 1 + 2, "总开关 + 七个状态 + 跳过子代理 + 每个收件目标一个启用勾");
+assert.equal(boxes.length, 1 + 7 + 2 + 2, "总开关 + 七个状态 + 跳过子代理 + 待答问题 + 每个收件目标一个启用勾");
 assert.equal(boxes[0].props.checked, true, "总开关跟着 enabled");
 assert.deepEqual(
   boxes.slice(1, 8).map((node) => node.props.checked),
@@ -125,6 +126,7 @@ assert.equal(picks[1].props.children[0].props.children, "weixin（1）", "下拉
 const spans = nodes.filter((node) => node.type === "span").map((node) => node.props.children);
 assert.ok(spans.includes("启用通知"));
 assert.ok(spans.includes("跳过子代理"));
+assert.ok(spans.includes("会话要你选择时也提示"));
 const flat = JSON.stringify(tree);
 assert.ok(flat.includes("tgt_1a2b3c4d5e6f7890"), "已填的 targetId 显示在输入框里");
 assert.ok(flat.includes("ziyongchajian=weixin"), "工作区规则回填到 textarea");
