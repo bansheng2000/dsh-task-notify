@@ -10,14 +10,17 @@
           #   channel  = dsh-im 的渠道名（weixin / telegram / slack / email / ...）
           #   botId    = dsh-im 里的「账户」，形如 wx_<24 hex>
           #   targetId = dsh-im 里的收件目标，形如 tgt_<16 hex>
-          # 留空 = 未绑定，跳过并计数（见 /_task-notify/status）。
+          #   enabled  = 这一条开不开；false 只是停用它，其它目标照发（按通道 + 账户粒度启停）
+          # 留空 = 未绑定，跳过并计数（见 /_task-notify/status，含哪些通道有账户）。
           targets:
             - channel: weixin
               botId: ""
               targetId: ""
+              enabled: true
             # - channel: telegram
             #   botId: ""
             #   targetId: ""
+            #   enabled: true
           # 按工作区覆盖目标列表。键可以是完整 cwd，也可以只写工作区目录名。
           # workspaces:
           #   ziyongchajian:

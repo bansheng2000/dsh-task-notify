@@ -102,11 +102,14 @@ function binding(overrides = {}) {
   assert.equal(rulesOf({ rules: { format: "html" } }).format, "plain");
 }
 
-// 4) targetsOf：单个目标当长度为 1 的列表；缺 botId/targetId 的项丢弃；channel 缺省 weixin
+// 4) targetsOf：单个目标当长度为 1 的列表；缺 botId/targetId 的项丢弃；channel 缺省 weixin；enabled 缺省 true
 {
-  assert.deepEqual(targetsOf({ botId: "b", targetId: "t" }), [{ channel: "weixin", botId: "b", targetId: "t" }]);
+  assert.deepEqual(targetsOf({ botId: "b", targetId: "t" }), [{ channel: "weixin", botId: "b", targetId: "t", enabled: true }]);
   assert.deepEqual(targetsOf([{ botId: "b", targetId: "t", channel: "slack" }, { botId: "", targetId: "t" }]), [
-    { channel: "slack", botId: "b", targetId: "t" },
+    { channel: "slack", botId: "b", targetId: "t", enabled: true },
+  ]);
+  assert.deepEqual(targetsOf([{ botId: "b", targetId: "t", enabled: false }]), [
+    { channel: "weixin", botId: "b", targetId: "t", enabled: false },
   ]);
   assert.deepEqual(targetsOf(undefined), []);
 }
@@ -142,10 +145,14 @@ function binding(overrides = {}) {
       workspaces: { ziyongchajian: [{ channel: "telegram", botId: "tg_zj", targetId: "tgt_zj" }] },
     },
   });
-  assert.deepEqual(resolveTargets(rules, "E:/x/ziyongchajian").targets, [{ channel: "telegram", botId: "tg_zj", targetId: "tgt_zj" }]);
-  assert.deepEqual(resolveTargets(rules, "E:/x/other").targets, [{ channel: "weixin", botId: "wx_default", targetId: "tgt_default" }]);
+  assert.deepEqual(resolveTargets(rules, "E:/x/ziyongchajian").targets, [{ channel: "telegram", botId: "tg_zj", targetId: "tgt_zj", enabled: true }]);
+  assert.deepEqual(resolveTargets(rules, "E:/x/other").targets, [{ channel: "weixin", botId: "wx_default", targetId: "tgt_default", enabled: true }]);
   assert.deepEqual(resolveTargets(rules, "E:/x/other").matchedBy, "default");
   assert.deepEqual(resolveTargets(rulesOf({}), "E:/x/other").matchedBy, null);
+  // 关掉的目标不进投递列表；全关等于未绑定
+  const off = rulesOf({ rules: { targets: [{ channel: "weixin", botId: "wx_default", targetId: "tgt_default", enabled: false }] } });
+  assert.deepEqual(resolveTargets(off, "E:/x/other").targets, []);
+  assert.equal(resolveTargets(off, "E:/x/other").matchedBy, null);
 }
 
 // 9) 去重键：同会话同原因同键；aborted 的不同 cause 不同键
@@ -203,7 +210,7 @@ function binding(overrides = {}) {
   ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
   await settle();
   assert.equal(im.calls.length, 0);
-  assert.ok(ctx._logs.some(([, msg]) => msg.includes("no target bound")));
+  assert.ok(ctx._logs.some(([, msg]) => msg.includes("no enabled target bound")));
 }
 
 // 14) 账户未连接：listBots 里没有该 bot 或 channel 不符 → 该目标跳过，其它目标照发
@@ -389,9 +396,45 @@ function binding(overrides = {}) {
   assert.equal(ok.last.turn, 7);
   assert.deepEqual(ok.targets.map((t) => t.channel), ["weixin", "telegram"]);
   assert.deepEqual(ok.bots, [{ botId: WX_BOT, channel: "weixin" }, { botId: TG_BOT, channel: "telegram" }]);
+  assert.deepEqual(ok.channels, [
+    { channel: "weixin", accounts: 1, botIds: [WX_BOT] },
+    { channel: "telegram", accounts: 1, botIds: [TG_BOT] },
+  ]);
 
   const bad = await readStatus(ctx, "POST");
   assert.equal(bad.status, 405);
+}
+
+// 27) 按通道 + 账户启停：enabled:false 的那条不投递，其它目标照发
+{
+  const im = fakeIm({ bots: [{ botId: WX_BOT, channel: "weixin" }, { botId: TG_BOT, channel: "telegram" }] });
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, binding({
+    targets: [
+      { channel: "weixin", botId: WX_BOT, targetId: WX_TARGET, enabled: false },
+      { channel: "telegram", botId: TG_BOT, targetId: TG_TARGET, enabled: true },
+    ],
+  }));
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+
+  assert.equal(im.calls.length, 1, "只发开着的那条");
+  assert.equal(im.calls[0].botId, TG_BOT);
+  const body = await readStatus(ctx, "GET");
+  assert.equal(body.notified, 1);
+  assert.equal(body.failed, 0);
+}
+
+// 28) 同通道多账户时 channels 汇总账户数
+{
+  const other = "wx_ffffffffffffffffffffffff";
+  const im = fakeIm({ bots: [{ botId: WX_BOT, channel: "weixin" }, { botId: other, channel: "weixin" }] });
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, binding({
+    targets: [{ channel: "weixin", botId: WX_BOT, targetId: WX_TARGET }, { channel: "weixin", botId: other, targetId: WX_TARGET }],
+  }));
+  const body = await readStatus(ctx, "GET");
+  assert.deepEqual(body.channels, [{ channel: "weixin", accounts: 2, botIds: [WX_BOT, other] }]);
 }
 
 /** 调一次状态路由并解析应答。 */

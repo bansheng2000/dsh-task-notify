@@ -5,6 +5,7 @@
 - **判定来源**：事件订阅 `session/event` 的 `turn/end`，零轮询，**覆盖全部工作区的全部会话**。
 - **投递通道**：复用 dsh-im 已有的渠道与账户配置（`ctx.dshIm.send`），不新建任何通道。
 - **多渠道**：一条通知扇出到 `targets` 列表里的每一个目标（渠道 + 账户 + 收件目标），某个目标失败不影响其它目标。
+- **按通道 + 账户启停**：每个目标自带 `enabled`；`false` 只停用它，其它目标照发。状态路由顺手列出**哪些通道有账户**（`channels`）。
 - **文案**：单行极简，失败 / 取消追加原因短语。
 - **未绑定 / 账户未连接**：跳过 + 记日志 + 计数，不报错打断监听。
 - **去重**：会话级——同一 `sessionId` + 同一结束原因只推一次（整批算一次，不是每个目标一次）。
@@ -44,14 +45,17 @@ config:
     #   channel  = 渠道名（weixin / telegram / slack / email / feishu / ...）
     #   botId    = dsh-im 里的「账户」，形如 wx_<24 hex>
     #   targetId = dsh-im 里的收件目标，形如 tgt_<16 hex>
+    #   enabled  = 这一条开不开；false 只是停用，别的目标照发（缺省 true）
     # 任一项缺 botId / targetId 会被丢弃（等于该目标不投递）。
     targets:
       - channel: weixin
         botId: "wx_0123456789abcdef01234567"
         targetId: "tgt_1a2b3c4d5e6f7890"
+        enabled: true
       - channel: telegram
         botId: "tg_0123456789abcdef01234567"
         targetId: "tgt_0f1e2d3c4b5a6978"
+        enabled: false          # 配好了但先不发
 
     # 按工作区覆盖目标列表。键可以是完整 cwd，也可以只写工作区目录名。
     workspaces:
@@ -65,7 +69,9 @@ config:
           targetId: "tgt_0f1e2d3c4b5a6978"
 ```
 
-`targets` / `workspaces` 里每一项都能配不同渠道、不同账户。写多个微信账户就多写几项 `channel: weixin`，`botId` 各不相同——插件不做去重，全发。
+`targets` / `workspaces` 里每一项都能配不同渠道、不同账户，并各自用 `enabled` 单独开关。写多个微信账户就多写几项 `channel: weixin`，`botId` 各不相同——插件不做去重，全发。
+
+想「换个渠道发」不用删配置：把旧目标 `enabled: false`，新目标 `enabled: true`，随时改回来。全关（或目标都被停用）= 该工作区视为未绑定，走「跳过 + 计数」那条路。
 
 ### 渠道与账户从哪来
 
@@ -75,7 +81,7 @@ dsh-im **没有**对外暴露「工作区 → 账户」的查询接口（`bot-wo
 - `botId`（账户）：同上返回的 `botId`，形如 `wx_` + 24 位十六进制。
 - `targetId`（收件目标）：dsh-im 的目标列表里自建的收件目标，形如 `tgt_` + 16 位十六进制。
 
-装好后先看状态路由里的 `bots`，那是 dsh-im 当前在线的账户，照着填最省事：
+装好后先看状态路由里的 `channels`（哪些通道有账户、各有几个）和 `bots`（逐个账户），照着填最省事：
 
 ```bash
 curl http://127.0.0.1:19387/_task-notify/status
@@ -144,7 +150,7 @@ pnpm update dsh-task-notify
 ## 验证
 
 ```powershell
-# 1) 插件自检（不依赖 DSH 宿主，26 项断言）
+# 1) 插件自检（不依赖 DSH 宿主，28 项断言）
 cd E:\文档\deepseek-harness\dsh-task-notify
 & "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\selftest.mjs
 # 期望：dsh-task-notify selftest: ok
@@ -158,9 +164,10 @@ curl http://127.0.0.1:19387/_task-notify/status
 ```json
 {
   "ok": true, "active": true, "format": "plain", "skipSubagents": true,
-  "targets": [{ "channel": "weixin", "botId": "wx_...", "targetId": "tgt_..." }],
+  "targets": [{ "channel": "weixin", "botId": "wx_...", "targetId": "tgt_...", "enabled": true }],
   "workspaces": {},
   "bots": [{ "botId": "wx_...", "channel": "weixin" }],
+  "channels": [{ "channel": "weixin", "accounts": 1, "botIds": ["wx_..."] }],
   "dshImInstalled": true,
   "seen": 12, "notified": 6, "failed": 0, "skippedUnbound": 3, "deduped": 1,
   "last": { "sessionId": "...", "turn": 3, "reason": "completed", "at": "..." }
@@ -178,6 +185,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 | `skippedUnbound` 一直涨 | `targets` / `workspaces` 缺 botId 或 targetId（半截配置会被整项丢弃），或该 `botId` 不在 `bots` 里 / `channel` 对不上。对照状态路由的 `bots` 核对。 |
 | `notified` 涨但某个渠道没收到 | 单个目标失败不会影响其它目标，但只会在日志里留一条 warn（`send not accepted: ...` / `send failed: ...`，带 `code`）。按 `targetId` 搜日志定位是哪个目标。 |
 | 微信 notified 但没收到 | `{sent:true}` 只代表平台接口接受，不代表送达。微信主动投递还需要用户消息里携带过的 `context_token`；先给机器人发一条微信消息再触发。 |
+| 某个通道 / 账户不想收了 | 把那条目标 `enabled: false`（不用删配置）；全停用等于该工作区未绑定，`skippedUnbound` 会涨、日志写 `no enabled target bound`。 |
 | 通知太吵 | `skipSubagents: true` 过滤 subagent；同会话同原因本来就只推一次。fork / 多轮会推多条，确需收敛可把去重键加上 turn。 |
 | 某个工作区没通知、别的有 | 检查 `workspaces` 的键：先按完整 `cwd` 匹配、再按目录名匹配，两者都没命中才回落默认 `targets`。 |
 | 改了 repo 代码但行为没变 | pnpm 装进 profile 的是真实拷贝。重新跑上面的 install，或直接改 `node_modules\dsh-task-notify\lib\index.js`。 |
@@ -189,5 +197,5 @@ lib/index.js       插件本体（Config / apply / 文案 / 去重 / 多渠道�
 cordis.patch.yml   bundle patch（- insert: 创建 loader 条目 + 配置示例）
 package.json       main=lib/index.js, dsh.bundle.patch=cordis.patch.yml
 README.md          本文件
-test/selftest.mjs  自检（26 项断言）
+test/selftest.mjs  自检（28 项断言）
 ```
