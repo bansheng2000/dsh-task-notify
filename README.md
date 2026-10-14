@@ -6,21 +6,33 @@
 - **投递通道**：复用 dsh-im 已有的渠道与账户配置（`ctx.dshIm.send`），不新建任何通道。
 - **多渠道**：一条通知扇出到 `targets` 列表里的每一个目标（渠道 + 账户 + 收件目标），某个目标失败不影响其它目标。
 - **按通道 + 账户启停**：每个目标自带 `enabled`；`false` 只停用它，其它目标照发。状态路由顺手列出**哪些通道有账户**（`channels`）。
-- **文案**：单行极简，失败 / 取消追加原因短语。
+- **文案**：首行「状态 | task-notify | 会话标题」，正文逐行「字段: 值」；失败 / 取消补一行「原因: ...」。
 - **未绑定 / 账户未连接**：跳过 + 记日志 + 计数，不报错打断监听。
 - **去重**：会话级——同一 `sessionId` + 同一结束原因只推一次（整批算一次，不是每个目标一次）。
 
 ## 通知长什么样
 
 ```
-✅ 任务完成 | task-notify | 工作区 ziyongchajian | 会话 6f2292c8-6b95-4d3d-ae8c-f73da0d9ad9e
-❌ 任务失败 | task-notify | 工作区 default-workspace | 会话 b2d7c70c-... | 502 bad gateway
-⚠️ 任务已取消 | task-notify | 工作区 ziyongchajian | 会话 6f2292c8-... | 用户主动终止
+✅ 任务完成 | task-notify | 安装自检报告 v0.2.2
+工作区: ziyongchajian
+会话: 6f2292c8-6b95-4d3d-ae8c-f73da0d9ad9e
+
+❌ 任务失败 | task-notify | 403 FreeTierError
+工作区: default-workspace
+会话: b2d7c70c-...
+原因: OpenCode's free tier can only be used from within OpenCode.
+
+⚠️ 任务已取消 | task-notify | ziyongchajian
+工作区: ziyongchajian
+会话: 6f2292c8-...
+原因: 用户主动终止
 ```
 
-各渠道收到的文案完全一致（同一 `format` 下）。
+首行第三段是**会话标题**（宿主 sessionTitle 服务折叠出的最新标题，即这次任务在干什么的人话标识，按码点截到 40 字）。标题服务没挂载或标题还是空白时退回**工作区名**，首行永远读得通。
 
-| 结束原因（`turn/end` 的 `reason.kind`） | 前缀 | 追加短语 |
+各渠道收到的文案完全一致（同一 format 下）。
+
+| 结束原因（`turn/end` 的 `reason.kind`） | 首行前缀 | 追加的「原因:」行 |
 | --- | --- | --- |
 | `completed` | ✅ 任务完成 | 无 |
 | `error` | ❌ 任务失败 | `error.message` / `error.code` |
@@ -150,7 +162,7 @@ pnpm update dsh-task-notify
 ## 验证
 
 ```powershell
-# 1) 插件自检（不依赖 DSH 宿主，28 项断言）
+# 1) 插件自检（不依赖 DSH 宿主，31 项断言）
 cd E:\文档\deepseek-harness\dsh-task-notify
 & "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\selftest.mjs
 # 期望：dsh-task-notify selftest: ok
@@ -197,5 +209,5 @@ lib/index.js       插件本体（Config / apply / 文案 / 去重 / 多渠道�
 cordis.patch.yml   bundle patch（- insert: 创建 loader 条目 + 配置示例）
 package.json       main=lib/index.js, dsh.bundle.patch=cordis.patch.yml
 README.md          本文件
-test/selftest.mjs  自检（28 项断言）
+test/selftest.mjs  自检（31 项断言）
 ```

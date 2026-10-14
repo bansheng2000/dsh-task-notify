@@ -1,6 +1,6 @@
 {
   "name": "dsh-task-notify",
-  "version": "0.2.2",
+  "version": "0.3.0",
   "description": "任务完成 / 失败 / 取消时通过 dsh-im 推通知，支持多渠道多账户扇出（覆盖全部工作区，会话级去重）。",
   "type": "module",
   "main": "lib/index.js",

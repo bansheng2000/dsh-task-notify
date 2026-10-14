@@ -3,10 +3,10 @@
 import assert from "node:assert/strict";
 
 const mod = await import("../lib/index.js");
-const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName } = mod;
+const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, formatMessage } = mod;
 
 /** 造一个最小 ctx：只存 on / inject，dshIm 与 logger 可注入。 */
-function makeCtx({ dshIm } = {}) {
+function makeCtx({ dshIm, sessionTitle } = {}) {
   const listeners = new Map();
   const logs = [];
   const routes = new Map();
@@ -17,6 +17,7 @@ function makeCtx({ dshIm } = {}) {
       error: (msg) => logs.push(["error", msg]),
     },
     dshIm,
+    sessionTitle,
     on: (event, fn) => {
       if (!listeners.has(event)) listeners.set(event, []);
       listeners.get(event).push(fn);
@@ -55,6 +56,7 @@ async function settle() {
 }
 
 const BS = String.fromCharCode(92);
+const NL = String.fromCharCode(10);
 
 const WX_BOT = "wx_0123456789abcdef01234567";
 const TG_BOT = "tg_0123456789abcdef01234567";
@@ -173,7 +175,7 @@ function binding(overrides = {}) {
   assert.equal(im.calls[0].botId, WX_BOT);
   assert.equal(im.calls[0].targetId, WX_TARGET);
   assert.equal(im.calls[0].options.format, "plain");
-  assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | 工作区 ziyongchajian | 会话 s1");
+  assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | ziyongchajian" + NL + "工作区: ziyongchajian" + NL + "会话: s1");
 }
 
 // 11) 失败路径：error 追加原因，且只推一次（去重）
@@ -186,7 +188,7 @@ function binding(overrides = {}) {
   ctx._emit("session/event", session("s1", "E:/x/ziyongchajian"), turnEnd(2, reason));
   await settle();
   assert.equal(im.calls.length, 1, "同一会话同一原因只推一次");
-  assert.equal(im.calls[0].text, "❌ 任务失败 | task-notify | 工作区 ziyongchajian | 会话 s1 | 502 bad gateway");
+  assert.equal(im.calls[0].text, "❌ 任务失败 | task-notify | ziyongchajian" + NL + "工作区: ziyongchajian" + NL + "会话: s1" + NL + "原因: 502 bad gateway");
 }
 
 // 12) 换会话 / 换原因会再推
@@ -199,7 +201,7 @@ function binding(overrides = {}) {
   ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(2, { kind: "aborted", reason: { kind: "user" } }));
   await settle();
   assert.equal(im.calls.length, 3);
-  assert.equal(im.calls[2].text, "⚠️ 任务已取消 | task-notify | 工作区 a | 会话 s1 | 用户主动终止");
+  assert.equal(im.calls[2].text, "⚠️ 任务已取消 | task-notify | a" + NL + "工作区: a" + NL + "会话: s1" + NL + "原因: 用户主动终止");
 }
 
 // 13) 未绑定目标：跳过、不发送
@@ -435,6 +437,45 @@ function binding(overrides = {}) {
   }));
   const body = await readStatus(ctx, "GET");
   assert.deepEqual(body.channels, [{ channel: "weixin", accounts: 2, botIds: [WX_BOT, other] }]);
+}
+
+// 29) 首行用会话标题（宿主 sessionTitle 服务），正文仍是字段行
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service, sessionTitle: { get: () => ({ title: "安装自检报告  版本 v0.2.2" }) } });
+  apply(ctx, binding());
+  ctx._emit("session/event", session("s1", "E:/x/ziyongchajian"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  assert.equal(im.calls.length, 1);
+  assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | 安装自检报告 版本 v0.2.2" + NL + "工作区: ziyongchajian" + NL + "会话: s1");
+}
+
+// 30) sessionTitle 缺席 / 抛错 / 空白都退回工作区名，不影响投递
+{
+  assert.equal(sessionTitle({}, session("s1", "E:/x/a")), "", "服务缺席给空串");
+  assert.equal(sessionTitle({ sessionTitle: { get: () => { throw new Error("boom"); } } }, session("s1", "E:/x/a")), "", "抛错也吞掉");
+  assert.equal(sessionTitle({ sessionTitle: { get: () => ({ title: "   " }) } }, session("s1", "E:/x/a")), "", "空白标题归一为空");
+  const long = sessionTitle({ sessionTitle: { get: () => ({ title: "x".repeat(60) }) } }, session("s1", "E:/x/a"));
+  assert.equal([...long].length, 40, "超长标题按码点截到 40");
+
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service, sessionTitle: { get: () => ({ title: "" }) } });
+  apply(ctx, binding());
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | a" + NL + "工作区: a" + NL + "会话: s1");
+}
+
+// 31) formatMessage：无原因时不出「原因:」行
+{
+  assert.equal(
+    formatMessage({ label: "✅ 任务完成", title: "T", cwd: "E:/x/a", sessionId: "s1", phrase: "" }),
+    "✅ 任务完成 | task-notify | T" + NL + "工作区: a" + NL + "会话: s1",
+  );
+  assert.equal(
+    formatMessage({ label: "❌ 任务失败", title: "", cwd: "E:/x/a", sessionId: "s1", phrase: "boom" }),
+    "❌ 任务失败 | task-notify | a" + NL + "工作区: a" + NL + "会话: s1" + NL + "原因: boom",
+  );
 }
 
 /** 调一次状态路由并解析应答。 */
