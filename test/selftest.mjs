@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 
 const mod = await import("../lib/index.js");
-const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, formatMessage } = mod;
+const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, shortSessionId, formatMessage } = mod;
 
 /** 造一个最小 ctx：只存 on / inject，dshIm 与 logger 可注入。 */
 function makeCtx({ dshIm, sessionTitle } = {}) {
@@ -456,7 +456,7 @@ function binding(overrides = {}) {
   assert.equal(sessionTitle({ sessionTitle: { get: () => { throw new Error("boom"); } } }, session("s1", "E:/x/a")), "", "抛错也吞掉");
   assert.equal(sessionTitle({ sessionTitle: { get: () => ({ title: "   " }) } }, session("s1", "E:/x/a")), "", "空白标题归一为空");
   const long = sessionTitle({ sessionTitle: { get: () => ({ title: "x".repeat(60) }) } }, session("s1", "E:/x/a"));
-  assert.equal([...long].length, 40, "超长标题按码点截到 40");
+  assert.equal([...long].length, 20, "超长标题按码点截到 20");
 
   const im = fakeIm();
   const ctx = makeCtx({ dshIm: im.service, sessionTitle: { get: () => ({ title: "" }) } });
@@ -476,6 +476,21 @@ function binding(overrides = {}) {
     formatMessage({ label: "❌ 任务失败", title: "", cwd: "E:/x/a", sessionId: "s1", phrase: "boom" }),
     "❌ 任务失败 | task-notify | a" + NL + "工作区: a" + NL + "会话: s1" + NL + "原因: boom",
   );
+}
+
+// 32) 会话标识短码：剥前缀取前 8 位，真实 session-uuid 变短且仍能对上日志
+{
+  assert.equal(shortSessionId("session-6f2292c8-6b95-4d3d-ae8c-f73da0d9ad9e"), "6f2292c8");
+  assert.equal(shortSessionId("session-abc"), "abc", "短 id 原样保留");
+  assert.equal(shortSessionId("6f2292c8-6b95"), "6f2292c8", "没有前缀也照样截");
+  assert.equal(shortSessionId(""), "unknown");
+
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, binding());
+  ctx._emit("session/event", session("session-6f2292c8-6b95-4d3d-ae8c-f73da0d9ad9e", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | a" + NL + "工作区: a" + NL + "会话: 6f2292c8");
 }
 
 /** 调一次状态路由并解析应答。 */

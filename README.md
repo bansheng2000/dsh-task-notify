@@ -13,22 +13,24 @@
 ## 通知长什么样
 
 ```
-✅ 任务完成 | task-notify | 安装自检报告 v0.2.2
+✅ 任务完成 | task-notify | 安装自检报告
 工作区: ziyongchajian
-会话: 6f2292c8-6b95-4d3d-ae8c-f73da0d9ad9e
+会话: 6f2292c8
 
 ❌ 任务失败 | task-notify | 403 FreeTierError
 工作区: default-workspace
-会话: b2d7c70c-...
+会话: b2d7c70c
 原因: OpenCode's free tier can only be used from within OpenCode.
 
-⚠️ 任务已取消 | task-notify | ziyongchajian
+⚠️ 任务已取消 | task-notify | 微信文案微调
 工作区: ziyongchajian
-会话: 6f2292c8-...
+会话: 6f2292c8
 原因: 用户主动终止
 ```
 
-首行第三段是**会话标题**（宿主 sessionTitle 服务折叠出的最新标题，即这次任务在干什么的人话标识，按码点截到 40 字）。标题服务没挂载或标题还是空白时退回**工作区名**，首行永远读得通。
+首行第三段是**会话标题**（宿主 sessionTitle 服务折叠出的最新标题，即这次任务在干什么的人话标识），按码点截到 **20 字**。标题服务没挂载或标题还是空白时退回**工作区名**，首行永远读得通。
+
+「会话」那一行是**短码**：剥掉 `session-` 前缀后取前 8 位（`session-6f2292c8-…` → `6f2292c8`），够在日志里对上，又不撑爆一行。
 
 各渠道收到的文案完全一致（同一 format 下）。
 
@@ -162,7 +164,7 @@ pnpm update dsh-task-notify
 ## 验证
 
 ```powershell
-# 1) 插件自检（不依赖 DSH 宿主，31 项断言）
+# 1) 插件自检（不依赖 DSH 宿主，32 项断言）
 cd E:\文档\deepseek-harness\dsh-task-notify
 & "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\selftest.mjs
 # 期望：dsh-task-notify selftest: ok
@@ -209,5 +211,5 @@ lib/index.js       插件本体（Config / apply / 文案 / 去重 / 多渠道�
 cordis.patch.yml   bundle patch（- insert: 创建 loader 条目 + 配置示例）
 package.json       main=lib/index.js, dsh.bundle.patch=cordis.patch.yml
 README.md          本文件
-test/selftest.mjs  自检（31 项断言）
+test/selftest.mjs  自检（32 项断言）
 ```
