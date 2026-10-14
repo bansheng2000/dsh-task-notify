@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 
 const mod = await import("../lib/index.js");
-const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, shortSessionId, formatMessage } = mod;
+const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, titleSummary, formatMessage } = mod;
 
 /** 造一个最小 ctx：只存 on / inject，dshIm 与 logger 可注入。 */
 function makeCtx({ dshIm, sessionTitle } = {}) {
@@ -175,7 +175,7 @@ function binding(overrides = {}) {
   assert.equal(im.calls[0].botId, WX_BOT);
   assert.equal(im.calls[0].targetId, WX_TARGET);
   assert.equal(im.calls[0].options.format, "plain");
-  assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | ziyongchajian" + NL + "工作区: ziyongchajian" + NL + "会话: s1");
+  assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | ziyongchajian" + NL + "工作区: ziyongchajian", "没有标题就不出「会话:」行");
 }
 
 // 11) 失败路径：error 追加原因，且只推一次（去重）
@@ -188,7 +188,7 @@ function binding(overrides = {}) {
   ctx._emit("session/event", session("s1", "E:/x/ziyongchajian"), turnEnd(2, reason));
   await settle();
   assert.equal(im.calls.length, 1, "同一会话同一原因只推一次");
-  assert.equal(im.calls[0].text, "❌ 任务失败 | task-notify | ziyongchajian" + NL + "工作区: ziyongchajian" + NL + "会话: s1" + NL + "原因: 502 bad gateway");
+  assert.equal(im.calls[0].text, "❌ 任务失败 | task-notify | ziyongchajian" + NL + "工作区: ziyongchajian" + NL + "原因: 502 bad gateway");
 }
 
 // 12) 换会话 / 换原因会再推
@@ -201,7 +201,7 @@ function binding(overrides = {}) {
   ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(2, { kind: "aborted", reason: { kind: "user" } }));
   await settle();
   assert.equal(im.calls.length, 3);
-  assert.equal(im.calls[2].text, "⚠️ 任务已取消 | task-notify | a" + NL + "工作区: a" + NL + "会话: s1" + NL + "原因: 用户主动终止");
+  assert.equal(im.calls[2].text, "⚠️ 任务已取消 | task-notify | a" + NL + "工作区: a" + NL + "原因: 用户主动终止");
 }
 
 // 13) 未绑定目标：跳过、不发送
@@ -439,15 +439,15 @@ function binding(overrides = {}) {
   assert.deepEqual(body.channels, [{ channel: "weixin", accounts: 2, botIds: [WX_BOT, other] }]);
 }
 
-// 29) 首行用会话标题（宿主 sessionTitle 服务），正文仍是字段行
+// 29) 首行短摘要（标题前 20 字），正文「会话:」放完整标题
 {
   const im = fakeIm();
-  const ctx = makeCtx({ dshIm: im.service, sessionTitle: { get: () => ({ title: "安装自检报告  版本 v0.2.2" }) } });
+  const ctx = makeCtx({ dshIm: im.service, sessionTitle: { get: () => ({ title: "任务完成通知插件对接 dsh-im" }) } });
   apply(ctx, binding());
   ctx._emit("session/event", session("s1", "E:/x/ziyongchajian"), turnEnd(1, { kind: "completed" }));
   await settle();
   assert.equal(im.calls.length, 1);
-  assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | 安装自检报告 版本 v0.2.2" + NL + "工作区: ziyongchajian" + NL + "会话: s1");
+  assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | 任务完成通知插件对接 dsh-im" + NL + "工作区: ziyongchajian" + NL + "会话: 任务完成通知插件对接 dsh-im");
 }
 
 // 30) sessionTitle 缺席 / 抛错 / 空白都退回工作区名，不影响投递
@@ -455,42 +455,44 @@ function binding(overrides = {}) {
   assert.equal(sessionTitle({}, session("s1", "E:/x/a")), "", "服务缺席给空串");
   assert.equal(sessionTitle({ sessionTitle: { get: () => { throw new Error("boom"); } } }, session("s1", "E:/x/a")), "", "抛错也吞掉");
   assert.equal(sessionTitle({ sessionTitle: { get: () => ({ title: "   " }) } }, session("s1", "E:/x/a")), "", "空白标题归一为空");
-  const long = sessionTitle({ sessionTitle: { get: () => ({ title: "x".repeat(60) }) } }, session("s1", "E:/x/a"));
-  assert.equal([...long].length, 20, "超长标题按码点截到 20");
+  const long = sessionTitle({ sessionTitle: { get: () => ({ title: "x".repeat(300) }) } }, session("s1", "E:/x/a"));
+  assert.equal([...long].length, 100, "超长标题按码点兜到 100");
 
   const im = fakeIm();
   const ctx = makeCtx({ dshIm: im.service, sessionTitle: { get: () => ({ title: "" }) } });
   apply(ctx, binding());
   ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
   await settle();
-  assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | a" + NL + "工作区: a" + NL + "会话: s1");
+  assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | a" + NL + "工作区: a");
 }
 
-// 31) formatMessage：无原因时不出「原因:」行
+// 31) formatMessage：无原因不出「原因:」行；无标题不出「会话:」行
 {
   assert.equal(
-    formatMessage({ label: "✅ 任务完成", title: "T", cwd: "E:/x/a", sessionId: "s1", phrase: "" }),
-    "✅ 任务完成 | task-notify | T" + NL + "工作区: a" + NL + "会话: s1",
+    formatMessage({ label: "✅ 任务完成", title: "标题全文", cwd: "E:/x/a", phrase: "" }),
+    "✅ 任务完成 | task-notify | 标题全文" + NL + "工作区: a" + NL + "会话: 标题全文",
   );
   assert.equal(
-    formatMessage({ label: "❌ 任务失败", title: "", cwd: "E:/x/a", sessionId: "s1", phrase: "boom" }),
-    "❌ 任务失败 | task-notify | a" + NL + "工作区: a" + NL + "会话: s1" + NL + "原因: boom",
+    formatMessage({ label: "❌ 任务失败", title: "", cwd: "E:/x/a", phrase: "boom" }),
+    "❌ 任务失败 | task-notify | a" + NL + "工作区: a" + NL + "原因: boom",
   );
+  // 首行摘要只取前 20 字，正文仍是完整标题
+  const longTitle = "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十";
+  const msg = formatMessage({ label: "✅ 任务完成", title: longTitle, cwd: "E:/x/a", phrase: "" });
+  assert.equal(msg.split(NL)[0], "✅ 任务完成 | task-notify | " + titleSummary(longTitle));
+  assert.equal([...titleSummary(longTitle)].length, 20);
+  assert.ok(msg.includes("会话: " + longTitle), "正文保留完整标题");
 }
 
-// 32) 会话标识短码：剥前缀取前 8 位，真实 session-uuid 变短且仍能对上日志
+// 32) 标题服务缺席时首行退回工作区名，正文里不会出现裸 session id
 {
-  assert.equal(shortSessionId("session-6f2292c8-6b95-4d3d-ae8c-f73da0d9ad9e"), "6f2292c8");
-  assert.equal(shortSessionId("session-abc"), "abc", "短 id 原样保留");
-  assert.equal(shortSessionId("6f2292c8-6b95"), "6f2292c8", "没有前缀也照样截");
-  assert.equal(shortSessionId(""), "unknown");
-
   const im = fakeIm();
   const ctx = makeCtx({ dshIm: im.service });
   apply(ctx, binding());
   ctx._emit("session/event", session("session-6f2292c8-6b95-4d3d-ae8c-f73da0d9ad9e", "E:/x/a"), turnEnd(1, { kind: "completed" }));
   await settle();
-  assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | a" + NL + "工作区: a" + NL + "会话: 6f2292c8");
+  assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | a" + NL + "工作区: a");
+  assert.ok(!im.calls[0].text.includes("6f2292c8"), "不把 session id 当标题塞进通知");
 }
 
 /** 调一次状态路由并解析应答。 */

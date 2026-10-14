@@ -13,24 +13,26 @@
 ## 通知长什么样
 
 ```
-✅ 任务完成 | task-notify | 安装自检报告
+✅ 任务完成 | task-notify | 任务完成通知插件对接 dsh-im
 工作区: ziyongchajian
-会话: 6f2292c8
+会话: 任务完成通知插件对接 dsh-im
 
 ❌ 任务失败 | task-notify | 403 FreeTierError
 工作区: default-workspace
-会话: b2d7c70c
+会话: prompt-optimizer 我想…
 原因: OpenCode's free tier can only be used from within OpenCode.
 
 ⚠️ 任务已取消 | task-notify | 微信文案微调
 工作区: ziyongchajian
-会话: 6f2292c8
+会话: 微信文案微调
 原因: 用户主动终止
 ```
 
-首行第三段是**会话标题**（宿主 sessionTitle 服务折叠出的最新标题，即这次任务在干什么的人话标识），按码点截到 **20 字**。标题服务没挂载或标题还是空白时退回**工作区名**，首行永远读得通。
+标题就是侧栏会话列表里那一行文字（宿主 `sessionTitle` 服务折叠出的最新标题），用来认出「这次在干什么」。
 
-「会话」那一行是**短码**：剥掉 `session-` 前缀后取前 8 位（`session-6f2292c8-…` → `6f2292c8`），够在日志里对上，又不撑爆一行。
+- **首行第三段**：标题摘要，按码点截到 **20 字**，一屏读完；
+- **`会话:` 那一行**：**完整标题**，不截断；
+- **标题服务没挂载、或标题还是空白**：首行退回工作区名，**整条通知里不出现 `会话:` 行**（不拿 session id 凑数，那串 uuid 只会占地方看不懂）。
 
 各渠道收到的文案完全一致（同一 format 下）。
 
