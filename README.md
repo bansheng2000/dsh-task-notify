@@ -97,26 +97,41 @@ curl http://127.0.0.1:19387/_task-notify/status
 {
   "dsh": { "profile": { "bundles": ["...", "dsh-task-notify"] } },
   "dependencies": {
-    "dsh-task-notify": "file:E:/文档/deepseek-harness/dsh-task-notify"
+    "dsh-task-notify": "github:bansheng2000/dsh-task-notify"
   }
 }
 ```
 
-> 路径必须是**绝对正斜杠**路径。相对路径会报 `ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND`。
+> 本机开发时把依赖写成 `file:E:/文档/deepseek-harness/dsh-task-notify` 指向本地仓库；
+> 别的机器用上面这条 `github:` 规格装。路径必须是**绝对正斜杠**路径，
+> 相对路径会报 `ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND`。
 
-2. 重装依赖（pnpm 装进 profile 的是**真实拷贝**，改了 repo 文件必须重跑）：
+2. 在 profile 目录装依赖：
 
 ```powershell
-$env:ELECTRON_RUN_AS_NODE = "1"
-& "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" `
-  "F:\Programs\DeepSeek Harness\resources\runtime\pnpm\bin\pnpm.mjs" `
-  --dir "C:\Users\12576\.dsh\profiles\desktop" install `
-  --config.minimumReleaseAge=0
+cd C:\Users\12576\.dsh\profiles\desktop
+pnpm install
 ```
+
+> DSH 自带的 pnpm 在 `F:\Programs\DeepSeek Harness\resources\runtime\pnpm\bin\pnpm.mjs`，
+> 需要 `$env:ELECTRON_RUN_AS_NODE = "1"` 才能直接跑。
+> pnpm 装进 profile 的是**真实拷贝**：改了 repo 文件必须重跑 install 才生效。
 
 3. 重启 DSH。
 
+> 装完确认一下：`node_modules/dsh-task-notify/` 下应有 `lib/index.js` 与 `cordis.patch.yml`。
+
 bundle 自带的 `cordis.patch.yml` 用 `- insert:` 创建 loader 条目，**不要**手改成顶层扁平 `- id:`——扁平形态只会改已有条目，条目不存在时静默空操作，插件永不挂载。
+
+## 更新
+
+```powershell
+cd C:\Users\12576\.dsh\profiles\desktop
+pnpm update dsh-task-notify   # 裸 github: 规格重新解析 main 最新提交
+# 想按版本升级：把依赖写成 github:bansheng2000/dsh-task-notify#semver:^0.2.0，配合 tag
+```
+
+然后重启 DSH——不重启内存里跑的还是旧代码。
 
 ## 验证
 
