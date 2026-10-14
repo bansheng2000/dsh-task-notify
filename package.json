@@ -1,15 +1,18 @@
 {
   "name": "dsh-task-notify",
-  "version": "0.4.0",
-  "description": "任务完成 / 失败 / 取消时通过 dsh-im 推通知，支持多渠道多账户扇出（覆盖全部工作区，会话级去重）。",
+  "version": "0.5.0",
+  "description": "任务完成 / 失败 / 取消时通过 dsh-im 推通知，支持多渠道多账户扇出（覆盖全部工作区，会话级去重），开关与收件目标在设置里可改。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
     ".": "./lib/index.js",
+    "./client": "./lib/client.js",
     "./package.json": "./package.json"
   },
   "files": [
     "lib/index.js",
+    "lib/bridge.js",
+    "lib/client.js",
     "cordis.patch.yml",
     "README.md"
   ],
@@ -28,9 +31,45 @@
   "dependencies": {
     "@deepseek-ai/schemastery": "^3.18.4"
   },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "@deepseek-ai/dsh-client-locale": "^0.1.7-rc.1 || ^0.2.0-rc.1",
+    "@deepseek-ai/dsh-client-ui-plugin-manager": "^0.1.7-rc.1 || ^0.2.0-rc.1",
+    "@deepseek-ai/dsh-client-ui-settings": "^0.1.7-rc.1 || ^0.2.0-rc.1",
+    "@deepseek-ai/dsh-settings": "^0.1.7-rc.1 || ^0.2.0-rc.1",
+    "react": "^18.2.0"
+  },
+  "peerDependenciesMeta": {
+    "@deepseek-ai/cordis": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-locale": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-plugin-manager": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-client-ui-settings": {
+      "optional": true
+    },
+    "@deepseek-ai/dsh-settings": {
+      "optional": true
+    },
+    "react": {
+      "optional": true
+    }
+  },
   "dsh": {
     "bundle": {
       "patch": "cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "@deepseek-ai/dsh-client-locale",
+        "@deepseek-ai/dsh-client-ui-settings",
+        "@deepseek-ai/dsh-client-ui-plugin-manager"
+      ],
+      "platform": "web"
     },
     "engines": {
       "dsh": ">=0.1.7-rc.1"

@@ -9,6 +9,7 @@
 - **文案**：首行「状态 | task-notify | 会话标题」，正文逐行「字段: 值」；失败 / 取消补一行「原因: ...」。
 - **未绑定 / 账户未连接**：跳过 + 记日志 + 计数，不报错打断监听。
 - **去重**：会话级——同一 `sessionId` + 同一结束原因只推一次（整批算一次，不是每个目标一次）。
+- **设置里可改**：插件自带设置卡片（设置 → 插件 → dsh-task-notify → 行配置），开关、状态过滤、目标列表、工作区规则都能改，**落盘即生效，不用重启**。
 
 ## 通知长什么样
 
@@ -95,6 +96,38 @@ config:
 
 想「换个渠道发」不用删配置：把旧目标 `enabled: false`，新目标 `enabled: true`，随时改回来。全关（或目标都被停用）= 该工作区视为未绑定，走「跳过 + 计数」那条路。
 
+### 在设置里改（推荐）
+
+装好之后不用再碰 yml：**设置 → 插件 → 已安装 → dsh-task-notify → 行配置**，就是本插件自带的一张卡片（第三方插件的设置页是插件自己写进宿主 slot 的，宿主不代填表单）。
+
+卡片上能改的东西与上面配置一一对应：
+
+- 总开关「启用通知」、七种结束原因的勾选、「跳过子代理」、消息格式；
+- 投递目标列表（增删改）：启用勾、通道下拉（括号里是该通道的账户数）、`botId`、`targetId`，「选收件人」按钮会列出该账户下 dsh-im 已有的收件目标让你点；
+- 工作区规则（每行一条 `名称=channel|botId|targetId`）；
+- 「刷新」重新读配置、「发测试通知」真发一条（不受状态开关影响，用来验证通道与账户是不是通的）；
+- 底部计数：已推送 / 未绑定跳过 / 状态过滤 / 去重 / 失败。
+
+卡片顶部如果写着「dsh-im 当前没有在线账户」，说明 `ctx.dshIm` 没就绪或还没配任何通道——通知会全部跳过，不会静默丢。
+
+**改完立即生效，不用重启 DSH。** 与 yml 的关系：卡片写的是同一个命名空间 `task-notify` 的配置，两边是同一份数据；真要批量编辑或做版本管理时改 yml，然后重启（或在卡片上点「刷新」让它重新读）。
+
+卡片背后是插件自己起的 HTTP 桥（`/api/dsh-task-notify-settings/*`），只接受回环请求；HTTP 直连主要用于脚本化改配置：
+
+```bash
+# 读当前配置 + 在线账户 + 计数
+curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
+
+# 写：关掉「已分叉」这类噪音通知
+curl -X POST http://127.0.0.1:19387/api/dsh-task-notify-settings/mutate \
+  -H "content-type: application/json" \
+  -d '{"ns":"task-notify","ops":[{"op":"set","path":["rules","statuses","forked"],"value":false}]}'
+
+# 实发一条测试通知
+curl -X POST http://127.0.0.1:19387/api/dsh-task-notify-settings/test -H "content-type: application/json" -d '{}'
+```
+
+应答一律 `{ok:true,value:...}` / `{ok:false,code,message}`；写操作只接受本插件自己的命名空间（否则 `settings-not-exposed`）。
 ### 渠道与账户从哪来
 
 dsh-im **没有**对外暴露「工作区 → 账户」的查询接口（`bot-workspace-store.mjs` 不在包的 `exports` 里），所以关联关系由本插件配置显式声明。三段信息都在 dsh-im 侧维护：
@@ -125,7 +158,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 {
   "dsh": { "profile": { "bundles": ["...", "dsh-task-notify"] } },
   "dependencies": {
-    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.4.0"
+    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.5.0"
   }
 }
 ```
@@ -134,11 +167,11 @@ curl http://127.0.0.1:19387/_task-notify/status
 >
 > | 规格 | 场景 | 说明 |
 > | --- | --- | --- |
-> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.2.1` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
+> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.5.0` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
 > | `github:bansheng2000/dsh-task-notify` | 追 `main` 最新提交 | pnpm 会走 `git ls-remote git+ssh://git@github.com/...`，没配 ssh key 的机器 exit 128。修法：`git config --global url."https://github.com/".insteadOf "git+ssh://git@github.com/"` |
 > | `file:E:/文档/deepseek-harness/dsh-task-notify` | 本机开发 | 必须**绝对正斜杠**路径，相对路径报 `ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND` |
 >
-> `#semver:` 前缀（`...#semver:^0.2.1`）只对 `github:` / `git+https:` 规格有意义，tarball URL 用版本号本身固定。
+> `#semver:` 前缀（`...#semver:^0.5.0`）只对 `github:` / `git+https:` 规格有意义，tarball URL 用版本号本身固定。
 
 2. 在 profile 目录装依赖：
 
@@ -148,7 +181,8 @@ pnpm install
 ```
 
 > DSH 自带的 pnpm 在 `F:\Programs\DeepSeek Harness\resources\runtime\pnpm\bin\pnpm.mjs`，
-> 需要 `$env:ELECTRON_RUN_AS_NODE = "1"` 才能直接跑。
+> 需要 `$env:ELECTRON_RUN_AS_NODE = "1"` 才能直接跑
+> （本机没装独立 node：`$env:ELECTRON_RUN_AS_NODE="1"; & "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" "<pnpm.mjs>" --dir "<profile>" install`）。
 > pnpm 装进 profile 的是**真实拷贝**：改了 repo 文件必须重跑 install 才生效。
 
 3. 重启 DSH。
@@ -161,7 +195,7 @@ bundle 自带的 `cordis.patch.yml` 用 `- insert:` 创建 loader 条目，**不
 
 ```powershell
 cd C:\Users\12576\.dsh\profiles\desktop
-# tarball 规格：先把依赖里的版本号改掉（v0.2.1 → 新版本），再
+# tarball 规格：先把依赖里的版本号改掉（v0.5.0 → 新版本），再
 pnpm install
 # 裸 github: 规格跟 main，无需改任何东西
 pnpm update dsh-task-notify
@@ -172,13 +206,17 @@ pnpm update dsh-task-notify
 ## 验证
 
 ```powershell
-# 1) 插件自检（不依赖 DSH 宿主，34 项断言）
+# 1) 插件自检（不依赖 DSH 宿主）
 cd E:\文档\deepseek-harness\dsh-task-notify
-& "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\selftest.mjs
-# 期望：dsh-task-notify selftest: ok
+& "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\selftest.mjs   # 服务端，40 项
+& "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\client.mjs     # 设置卡片
+# 期望：dsh-task-notify selftest: ok / dsh-task-notify client selftest: ok
 
 # 2) 确认已挂载：apply() 跑了才会注册状态路由
 curl http://127.0.0.1:19387/_task-notify/status
+
+# 3) 设置桥在（卡片靠它；404 = 桥没注册 = 服务端插件没挂上）
+curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 ```
 
 状态路由返回生效配置、dsh-im 在线账户与计数：
@@ -214,13 +252,18 @@ curl http://127.0.0.1:19387/_task-notify/status
 | `filtered` 涨但一条没收到 | `statuses` 把这种结束原因关了（`filtered` 数被开关拦下的轮次）。看 `statuses` 哪项是 `false`。 |
 | 某个工作区没通知、别的有 | 检查 `workspaces` 的键：先按完整 `cwd` 匹配、再按目录名匹配，两者都没命中才回落默认 `targets`。 |
 | 改了 repo 代码但行为没变 | pnpm 装进 profile 的是真实拷贝。重新跑上面的 install，或直接改 `node_modules\dsh-task-notify\lib\index.js`。 |
+| 设置里找不到 dsh-task-notify 的配置行 | 卡片挂在「插件 → 已安装」的**行配置**上，不是独立的设置页（宿主 rc.1 后只保留 `plugins.row.config` 这一个 slot）。若整行没有入口，先确认插件已挂载（状态路由 200）。 |
+| 卡片写着「桥未注册」 | 服务端没跑或版本对不上：`/api/dsh-task-notify-settings/describe` 是 404 就是桥没注册，先查 `/_task-notify/status` 是否 200。 |
 
 ## 文件
 
 ```
-lib/index.js       插件本体（Config / apply / 文案 / 去重 / 多渠道扇出 / 状态路由）
+lib/index.js       插件本体（Config / apply / 文案 / 去重 / 多渠道扇出 / 状态路由 / 桥接线）
+lib/bridge.js      设置桥：describe / mutate / targets / test 四个只读回环路由
+lib/client.js      设置卡片（window.__ModuleLoader__.load 形态，挂 plugins.row.config）
 cordis.patch.yml   bundle patch（- insert: 创建 loader 条目 + 配置示例）
-package.json       main=lib/index.js, dsh.bundle.patch=cordis.patch.yml
+package.json       main=lib/index.js, exports./client=lib/client.js, dsh.bundle.patch / dsh.client
 README.md          本文件
-test/selftest.mjs  自检（34 项断言）
+test/selftest.mjs  服务端自检（40 项断言）
+test/client.mjs    设置卡片自检（假 window + 假 react，渲染成纯对象树断言）
 ```
