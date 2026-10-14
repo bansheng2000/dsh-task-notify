@@ -122,7 +122,9 @@ config:
 卡片上能改的东西与上面配置一一对应：
 
 - 总开关「启用通知」、七种结束原因的勾选、「跳过子代理」、「会话要你选择时也提示」、消息格式；
-- 投递目标列表（增删改）：启用勾、通道下拉（括号里是该通道的账户数）、`botId`、`targetId`，「选收件人」按钮会列出该账户下 dsh-im 已有的收件目标让你点；
+- 投递目标列表（增删改）：启用勾、通道下拉（括号里是该通道的账户数）、`botId`、`targetId`，「选收件人」按钮会列出该账户下 dsh-im 已有的收件目标让你点。
+  - 这一行的 `botId` 是空的时候点它，卡片会直接告诉你缺什么（不会静默无反应）；
+  - 该账户在 dsh-im 里一条收件目标都没有时，按钮下面会给出「去 集成 → 该机器人 → 投递设置 → 从已聊过的会话选择」的下一步，而不是把下拉藏起来。
 - 工作区规则（每行一条 `名称=channel|botId|targetId`）；
 - 「刷新」重新读配置、「发测试通知」真发一条（不受状态开关影响，用来验证通道与账户是不是通的）；
 - 底部计数：已推送 / 未绑定跳过 / 状态过滤 / 去重 / 失败。
@@ -177,7 +179,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 {
   "dsh": { "profile": { "bundles": ["...", "dsh-task-notify"] } },
   "dependencies": {
-    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.6.0"
+    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.6.1"
   }
 }
 ```
@@ -186,7 +188,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 >
 > | 规格 | 场景 | 说明 |
 > | --- | --- | --- |
-> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.6.0` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
+> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.6.1` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
 > | `github:bansheng2000/dsh-task-notify` | 追 `main` 最新提交 | pnpm 会走 `git ls-remote git+ssh://git@github.com/...`，没配 ssh key 的机器 exit 128。修法：`git config --global url."https://github.com/".insteadOf "git+ssh://git@github.com/"` |
 > | `file:E:/文档/deepseek-harness/dsh-task-notify` | 本机开发 | 必须**绝对正斜杠**路径，相对路径报 `ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND` |
 >
@@ -214,7 +216,7 @@ bundle 自带的 `cordis.patch.yml` 用 `- insert:` 创建 loader 条目，**不
 
 ```powershell
 cd C:\Users\12576\.dsh\profiles\desktop
-# tarball 规格：先把依赖里的版本号改掉（v0.6.0 → 新版本），再
+# tarball 规格：先把依赖里的版本号改掉（v0.6.1 → 新版本），再
 pnpm install
 # 裸 github: 规格跟 main，无需改任何东西
 pnpm update dsh-task-notify
@@ -228,7 +230,7 @@ pnpm update dsh-task-notify
 # 1) 插件自检（不依赖 DSH 宿主）
 cd E:\文档\deepseek-harness\dsh-task-notify
 & "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\selftest.mjs   # 服务端，47 项
-& "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\client.mjs     # 设置卡片（含工厂 return 值断言）
+& "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\client.mjs     # 设置卡片（含工厂 return、按钮点击、桥失败三类回归）
 # 期望：dsh-task-notify selftest: ok / dsh-task-notify client selftest: ok
 
 # 2) 确认已挂载：apply() 跑了才会注册状态路由
@@ -276,6 +278,8 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 | 改了 repo 代码但行为没变 | pnpm 装进 profile 的是真实拷贝。重新跑上面的 install，或直接改 `node_modules\dsh-task-notify\lib\index.js`。 |
 | 设置里找不到 dsh-task-notify 的配置行 | 卡片挂在「插件 → 已安装」的**行配置**上，不是独立的设置页（宿主 rc.1 后只保留 `plugins.row.config` 这一个 slot）。若整行没有入口，先确认插件已挂载（状态路由 200）。 |
 | 卡片写着「桥未注册」 | 服务端没跑或版本对不上：`/api/dsh-task-notify-settings/describe` 是 404 就是桥没注册，先查 `/_task-notify/status` 是否 200。 |
+| 点「选收件人」没反应（v0.6.1 修） | 两个原因：① 这一行的 `botId` 是空的（旧版直接 `return`，什么都不做）—— 点上面的「+ 渠道 · …」按钮会自动填上；② botId 填了但 dsh-im 侧一条收件目标都没有（新机器常见），要去 设置 → 集成 → 该机器人 → 投递设置 →「从已聊过的会话选择」先建一条。v0.6.1 起两种情况都会在卡片上说清原因。 |
+| 卡片上按钮毫无反应、没有红字 | v0.6.1 之前 `bridgePost` 的 fetch / JSON 解析异常会直接 reject，调用方没接住。旧版本请先看浏览器控制台；新版会把「连不上设置桥」「返回 HTTP 401 而不是 JSON」直接显示在卡片底部。 |
 | DSH 启动即崩，报 `invalid plugin, expect function or object with an "apply" method, received undefined`（v0.5.0 修） | `lib/client.js` 的工厂**没有 `return module.exports`**。宿主 cordis 拿工厂返回值当插件对象，只往 `exports` 上挂而不 return，得到 undefined 就崩。宿主自己 grep 不到这个字符串（它在 `app.asar/app.asar` 内层），错误原文见 `%APPDATA%\@deepseek-ai\dsh-desktop\logs\crash-*-web-boot.log`。`test/client.mjs` 里已加断言兜这条：`factory()` 的返回值必须有 `apply`。 |
 
 ## 文件
@@ -288,5 +292,5 @@ cordis.patch.yml   bundle patch（- insert: 创建 loader 条目 + 配置示例�
 package.json       main=lib/index.js, exports./client=lib/client.js, dsh.bundle.patch / dsh.client
 README.md          本文件
 test/selftest.mjs  服务端自检（47 项断言）
-test/client.mjs    设置卡片自检（假 window + 假 react，渲染成纯对象树断言）
+test/client.mjs    设置卡片自检（假 window + 假 react，渲染成纯对象树断言；含按钮点击与桥失败的回归用例，8 组）
 ```

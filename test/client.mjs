@@ -59,10 +59,15 @@ function loadExports(seed) {
   assert.ok(captured, "client.js 应调 window.__ModuleLoader__.load");
 
   const queue = [...seed];
+  const sets = [];
   const react = {
     useState: (initial) => {
       const value = queue.length > 0 ? queue.shift() : typeof initial === "function" ? initial() : initial;
-      return [value, () => {}];
+      // 记下 setXxx 调过什么：「点了没反应」这类 bug 就死在这条路径上。
+      const slot = sets.length;
+      const set = (...args) => { sets[slot] = { index: slot, args }; };
+      sets[slot] = { index: slot, args: [] };
+      return [value, set];
     },
     useEffect: () => {},
     useCallback: (fn) => fn,
@@ -72,6 +77,7 @@ function loadExports(seed) {
   const plugin = captured.factory((spec) => (spec === "react" ? react : { jsx: (type, props) => ({ type, props }) }));
   assert.equal(typeof plugin?.apply, "function", "factory 必须 return module.exports");
   assert.equal(typeof plugin?.inject, "object", "inject 是数组");
+  plugin.__sets = sets;
   return plugin;
 }
 
@@ -147,5 +153,49 @@ const missing = loadExports([
   null, false, null, null,
 ]);
 assert.ok(JSON.stringify(missing.NotifyCard({})).includes("桥未注册"));
+
+// 8) 「选收件人」点了必须有反应：botId 为空要给提示，dsh-im 那边空列表要给出下一步
+const blank = loadExports([
+  Object.assign({}, DESCRIBED, {
+    config: Object.assign({}, DESCRIBED.config, {
+      targets: [{ enabled: true, channel: "weixin", botId: "", targetId: "" }],
+    }),
+  }),
+  null, null, false, null, null,
+]);
+const pickBtn = walk(blank.NotifyCard({})).find((node) => node.type === "button" && node.props?.children === "选收件人");
+assert.ok(pickBtn, "卡片上得有「选收件人」按钮");
+pickBtn.props.onClick();
+assert.equal(blank.__sets[1].args.length, 1, "botId 为空必须 setError，不能静默 return");
+assert.match(String(blank.__sets[1].args[0]), /botId/, "提示要说清楚缺什么");
+
+const empty = loadExports([DESCRIBED, null, null, false, null, { index: 0, options: [] }]);
+const emptyTree = JSON.stringify(empty.NotifyCard({}));
+assert.ok(emptyTree.includes("还没有已登记的收件目标"), "dsh-im 返回空列表时要给出下一步，而不是什么都不渲染");
+
+const filled = loadExports([DESCRIBED, null, null, false, null, { index: 0, options: [{ targetId: "tgt_9", name: "老王" }] }]);
+const filledSelects = walk(filled.NotifyCard({})).filter((node) => node.type === "select");
+assert.equal(filledSelects.length, 4, "有可选项时多出一个下拉（format + 两个 channel + 收件人）");
+const pickSelect = filledSelects.find((node) => JSON.stringify(node.props.children).includes("tgt_9"));
+assert.ok(pickSelect, "下拉里列着 dsh-im 返回的那个 targetId");
+
+// 9) 桥请求失败必须变成卡片上的一句人话，而不是被吞掉的 rejected promise
+const realFetch = globalThis.fetch;
+try {
+  globalThis.fetch = () => Promise.reject(new Error("connect ECONNREFUSED 127.0.0.1:19387"));
+  const down = await base.bridgeCall("/targets", "POST", { botId: "wx_1" });
+  assert.equal(down.ok, false, "fetch 抛异常也要返回 ok:false");
+  assert.equal(down.code, "bridge-unreachable");
+
+  globalThis.fetch = () => Promise.resolve({ status: 404, text: async () => "" });
+  assert.equal((await base.bridgeCall("/describe", "GET")).code, "bridge-missing");
+
+  globalThis.fetch = () => Promise.resolve({ status: 401, text: async () => "<html>login</html>" });
+  const html = await base.bridgeCall("/targets", "POST", { botId: "wx_1" });
+  assert.equal(html.code, "bridge-unreadable", "宿主鉴权页/HTML 也要读得出原因");
+  assert.match(html.message, /401/);
+} finally {
+  globalThis.fetch = realFetch;
+}
 
 console.log("dsh-task-notify client selftest: ok");
