@@ -15,36 +15,31 @@
 ```
 ✅ 任务完成 | task-notify | 任务完成通知插件对接 dsh-im
 工作区: ziyongchajian
-会话: 任务完成通知插件对接 dsh-im
 
-❌ 任务失败 | task-notify | 403 FreeTierError
+❌ 任务失败 | task-notify | prompt-optimizer 我想改一下系统提示词
 工作区: default-workspace
-会话: prompt-optimizer 我想…
 原因: OpenCode's free tier can only be used from within OpenCode.
 
 ⚠️ 任务已取消 | task-notify | 微信文案微调
 工作区: ziyongchajian
-会话: 微信文案微调
 原因: 用户主动终止
 ```
 
-标题就是侧栏会话列表里那一行文字（宿主 `sessionTitle` 服务折叠出的最新标题），用来认出「这次在干什么」。
+首行第三段是**会话标题**——就是侧栏会话列表里那一行文字（宿主 `sessionTitle` 服务折叠出的最新标题），**完整不截断**，用来认出「这次在干什么」。
 
-- **首行第三段**：标题摘要，按码点截到 **20 字**，一屏读完；
-- **`会话:` 那一行**：**完整标题**，不截断；
-- **标题服务没挂载、或标题还是空白**：首行退回工作区名，**整条通知里不出现 `会话:` 行**（不拿 session id 凑数，那串 uuid 只会占地方看不懂）。
+标题服务没挂载、或标题还是空白时，首行退回工作区名（不拿 session id 凑数，那串 uuid 只会占地方看不懂）。
 
 各渠道收到的文案完全一致（同一 format 下）。
 
-| 结束原因（`turn/end` 的 `reason.kind`） | 首行前缀 | 追加的「原因:」行 |
-| --- | --- | --- |
-| `completed` | ✅ 任务完成 | 无 |
-| `error` | ❌ 任务失败 | `error.message` / `error.code` |
-| `aborted` | ⚠️ 任务已取消 | cause：用户主动终止 / 上级会话取消 / 插件中断 / 会话释放 / 未知 |
-| `blocked` | ⛔ 任务被拦截 | 无 |
-| `max-tokens` | ⚠️ 任务中断（超出最大长度） | 无 |
-| `interrupted` | ⚠️ 任务中断 | 无 |
-| `forked` | 🔀 任务已分叉 | 无 |
+| 结束原因（`turn/end` 的 `reason.kind`） | 首行前缀 | 追加的「原因:」行 | 设置项 |
+| --- | --- | --- | --- |
+| `completed` | ✅ 任务完成 | 无 | `statuses.completed` |
+| `error` | ❌ 任务失败 | `error.message` / `error.code` | `statuses.error` |
+| `aborted` | ⚠️ 任务已取消 | cause：用户主动终止 / 上级会话取消 / 插件中断 / 会话释放 / 未知 | `statuses.aborted` |
+| `blocked` | ⛔ 任务被拦截 | 无 | `statuses.blocked` |
+| `max-tokens` | ⚠️ 任务中断（超出最大长度） | 无 | `statuses."max-tokens"` |
+| `interrupted` | ⚠️ 任务中断 | 无 | `statuses.interrupted` |
+| `forked` | 🔀 任务已分叉 | 无 | `statuses.forked` |
 
 ## 配置
 
@@ -56,6 +51,17 @@ config:
     enabled: true          # 总开关
     format: plain          # plain | markdown，所有目标共用
     skipSubagents: true    # 只报顶层任务，subagent 的轮次结束不推
+
+    # 每种结束原因一个开关，全开。关掉哪种就不再推哪种，
+    # 被拦下的轮次计入 /_task-notify/status 的 filtered。
+    statuses:
+      completed: true       # ✅ 任务完成
+      error: true           # ❌ 任务失败
+      aborted: true         # ⚠️ 任务已取消
+      blocked: true         # ⛔ 任务被拦截
+      max-tokens: true      # ⚠️ 超出最大长度
+      interrupted: true     # ⚠️ 任务中断
+      forked: true          # 🔀 任务已分叉
 
     # 投递目标列表：一条通知扇出到全部项。三者都取自 dsh-im：
     #   channel  = 渠道名（weixin / telegram / slack / email / feishu / ...）
@@ -119,7 +125,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 {
   "dsh": { "profile": { "bundles": ["...", "dsh-task-notify"] } },
   "dependencies": {
-    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.2.1"
+    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.4.0"
   }
 }
 ```
@@ -166,7 +172,7 @@ pnpm update dsh-task-notify
 ## 验证
 
 ```powershell
-# 1) 插件自检（不依赖 DSH 宿主，32 项断言）
+# 1) 插件自检（不依赖 DSH 宿主，34 项断言）
 cd E:\文档\deepseek-harness\dsh-task-notify
 & "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\selftest.mjs
 # 期望：dsh-task-notify selftest: ok
@@ -180,12 +186,14 @@ curl http://127.0.0.1:19387/_task-notify/status
 ```json
 {
   "ok": true, "active": true, "format": "plain", "skipSubagents": true,
+  "statuses": { "completed": true, "error": true, "aborted": true, "blocked": true,
+                "max-tokens": true, "interrupted": true, "forked": true },
   "targets": [{ "channel": "weixin", "botId": "wx_...", "targetId": "tgt_...", "enabled": true }],
   "workspaces": {},
   "bots": [{ "botId": "wx_...", "channel": "weixin" }],
   "channels": [{ "channel": "weixin", "accounts": 1, "botIds": ["wx_..."] }],
   "dshImInstalled": true,
-  "seen": 12, "notified": 6, "failed": 0, "skippedUnbound": 3, "deduped": 1,
+  "seen": 12, "notified": 6, "failed": 0, "skippedUnbound": 3, "deduped": 1, "filtered": 0,
   "last": { "sessionId": "...", "turn": 3, "reason": "completed", "at": "..." }
 }
 ```
@@ -202,7 +210,8 @@ curl http://127.0.0.1:19387/_task-notify/status
 | `notified` 涨但某个渠道没收到 | 单个目标失败不会影响其它目标，但只会在日志里留一条 warn（`send not accepted: ...` / `send failed: ...`，带 `code`）。按 `targetId` 搜日志定位是哪个目标。 |
 | 微信 notified 但没收到 | `{sent:true}` 只代表平台接口接受，不代表送达。微信主动投递还需要用户消息里携带过的 `context_token`；先给机器人发一条微信消息再触发。 |
 | 某个通道 / 账户不想收了 | 把那条目标 `enabled: false`（不用删配置）；全停用等于该工作区未绑定，`skippedUnbound` 会涨、日志写 `no enabled target bound`。 |
-| 通知太吵 | `skipSubagents: true` 过滤 subagent；同会话同原因本来就只推一次。fork / 多轮会推多条，确需收敛可把去重键加上 turn。 |
+| 通知太吵 | `skipSubagents: true` 过滤 subagent；`statuses` 里关掉不关心的类型（如 `forked: false`、`blocked: false`）；同会话同原因本来就只推一次。fork / 多轮会推多条，确需收敛可把去重键加上 turn。 |
+| `filtered` 涨但一条没收到 | `statuses` 把这种结束原因关了（`filtered` 数被开关拦下的轮次）。看 `statuses` 哪项是 `false`。 |
 | 某个工作区没通知、别的有 | 检查 `workspaces` 的键：先按完整 `cwd` 匹配、再按目录名匹配，两者都没命中才回落默认 `targets`。 |
 | 改了 repo 代码但行为没变 | pnpm 装进 profile 的是真实拷贝。重新跑上面的 install，或直接改 `node_modules\dsh-task-notify\lib\index.js`。 |
 
@@ -213,5 +222,5 @@ lib/index.js       插件本体（Config / apply / 文案 / 去重 / 多渠道�
 cordis.patch.yml   bundle patch（- insert: 创建 loader 条目 + 配置示例）
 package.json       main=lib/index.js, dsh.bundle.patch=cordis.patch.yml
 README.md          本文件
-test/selftest.mjs  自检（32 项断言）
+test/selftest.mjs  自检（34 项断言）
 ```

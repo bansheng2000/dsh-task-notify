@@ -6,6 +6,16 @@
           enabled: true
           format: plain
           skipSubagents: true
+          # 每种结束原因一个开关（全开）。关掉哪种就不再推哪种；
+          # 被开关拦下的轮次计到 /_task-notify/status 的 filtered。
+          statuses:
+            completed: true
+            error: true
+            aborted: true
+            blocked: true
+            max-tokens: true
+            interrupted: true
+            forked: true
           # 投递目标列表：一条通知扇出到全部目标。三者都取自 dsh-im：
           #   channel  = dsh-im 的渠道名（weixin / telegram / slack / email / ...）
           #   botId    = dsh-im 里的「账户」，形如 wx_<24 hex>

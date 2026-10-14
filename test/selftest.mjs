@@ -3,7 +3,7 @@
 import assert from "node:assert/strict";
 
 const mod = await import("../lib/index.js");
-const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, titleSummary, formatMessage } = mod;
+const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, formatMessage, statusEnabled } = mod;
 
 /** 造一个最小 ctx：只存 on / inject，dshIm 与 logger 可注入。 */
 function makeCtx({ dshIm, sessionTitle } = {}) {
@@ -447,7 +447,7 @@ function binding(overrides = {}) {
   ctx._emit("session/event", session("s1", "E:/x/ziyongchajian"), turnEnd(1, { kind: "completed" }));
   await settle();
   assert.equal(im.calls.length, 1);
-  assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | 任务完成通知插件对接 dsh-im" + NL + "工作区: ziyongchajian" + NL + "会话: 任务完成通知插件对接 dsh-im");
+  assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | 任务完成通知插件对接 dsh-im" + NL + "工作区: ziyongchajian", "标题完整出现在首行，不在正文重复");
 }
 
 // 30) sessionTitle 缺席 / 抛错 / 空白都退回工作区名，不影响投递
@@ -456,7 +456,7 @@ function binding(overrides = {}) {
   assert.equal(sessionTitle({ sessionTitle: { get: () => { throw new Error("boom"); } } }, session("s1", "E:/x/a")), "", "抛错也吞掉");
   assert.equal(sessionTitle({ sessionTitle: { get: () => ({ title: "   " }) } }, session("s1", "E:/x/a")), "", "空白标题归一为空");
   const long = sessionTitle({ sessionTitle: { get: () => ({ title: "x".repeat(300) }) } }, session("s1", "E:/x/a"));
-  assert.equal([...long].length, 100, "超长标题按码点兜到 100");
+  assert.equal([...long].length, 300, "标题不再截断，原样交给调用方");
 
   const im = fakeIm();
   const ctx = makeCtx({ dshIm: im.service, sessionTitle: { get: () => ({ title: "" }) } });
@@ -466,22 +466,20 @@ function binding(overrides = {}) {
   assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | a" + NL + "工作区: a");
 }
 
-// 31) formatMessage：无原因不出「原因:」行；无标题不出「会话:」行
+// 31) formatMessage：标题完整进首行；无原因不出「原因:」行；无标题退回工作区名
 {
   assert.equal(
     formatMessage({ label: "✅ 任务完成", title: "标题全文", cwd: "E:/x/a", phrase: "" }),
-    "✅ 任务完成 | task-notify | 标题全文" + NL + "工作区: a" + NL + "会话: 标题全文",
+    "✅ 任务完成 | task-notify | 标题全文" + NL + "工作区: a",
   );
   assert.equal(
     formatMessage({ label: "❌ 任务失败", title: "", cwd: "E:/x/a", phrase: "boom" }),
     "❌ 任务失败 | task-notify | a" + NL + "工作区: a" + NL + "原因: boom",
   );
-  // 首行摘要只取前 20 字，正文仍是完整标题
+  // 长标题不截断
   const longTitle = "一二三四五六七八九十一二三四五六七八九十一二三四五六七八九十";
   const msg = formatMessage({ label: "✅ 任务完成", title: longTitle, cwd: "E:/x/a", phrase: "" });
-  assert.equal(msg.split(NL)[0], "✅ 任务完成 | task-notify | " + titleSummary(longTitle));
-  assert.equal([...titleSummary(longTitle)].length, 20);
-  assert.ok(msg.includes("会话: " + longTitle), "正文保留完整标题");
+  assert.equal(msg.split(NL)[0], "✅ 任务完成 | task-notify | " + longTitle);
 }
 
 // 32) 标题服务缺席时首行退回工作区名，正文里不会出现裸 session id
@@ -493,6 +491,36 @@ function binding(overrides = {}) {
   await settle();
   assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | a" + NL + "工作区: a");
   assert.ok(!im.calls[0].text.includes("6f2292c8"), "不把 session id 当标题塞进通知");
+}
+
+// 33) statusEnabled：缺项 / 非布尔按开，未知 kind 跟 completed
+{
+  assert.equal(statusEnabled({}, "completed"), true, "没配就是开");
+  assert.equal(statusEnabled({ statuses: {} }, "error"), true);
+  assert.equal(statusEnabled({ statuses: { error: false } }, "error"), false);
+  assert.equal(statusEnabled({ statuses: { error: false } }, "completed"), true);
+  assert.equal(statusEnabled({ statuses: { error: "no" } }, "error"), true, "非布尔不当开关");
+  assert.equal(statusEnabled({ statuses: { completed: false } }, "brand-new-kind"), false, "未知 kind 跟 completed");
+  assert.equal(statusEnabled({}, undefined), true);
+}
+
+// 34) statuses 开关真的拦投递：关掉 completed 只推 error；filtered 计数也涨
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, binding({ statuses: { completed: false } }));
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  assert.equal(im.calls.length, 0, "completed 关掉就不发");
+  const body = await readStatus(ctx, "GET");
+  assert.equal(body.filtered, 1, "被过滤的计入 filtered");
+  assert.equal(body.statuses.completed, false);
+  assert.equal(body.statuses.error, true, "其它类型仍开");
+
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(2, { kind: "error", error: { message: "boom" } }));
+  await settle();
+  assert.equal(im.calls.length, 1, "error 照发");
+  assert.ok(im.calls[0].text.startsWith("❌ 任务失败"), im.calls[0].text);
 }
 
 /** 调一次状态路由并解析应答。 */
