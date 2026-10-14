@@ -209,7 +209,7 @@ pnpm update dsh-task-notify
 # 1) 插件自检（不依赖 DSH 宿主）
 cd E:\文档\deepseek-harness\dsh-task-notify
 & "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\selftest.mjs   # 服务端，40 项
-& "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\client.mjs     # 设置卡片
+& "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\client.mjs     # 设置卡片（含工厂 return 值断言）
 # 期望：dsh-task-notify selftest: ok / dsh-task-notify client selftest: ok
 
 # 2) 确认已挂载：apply() 跑了才会注册状态路由
@@ -254,6 +254,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 | 改了 repo 代码但行为没变 | pnpm 装进 profile 的是真实拷贝。重新跑上面的 install，或直接改 `node_modules\dsh-task-notify\lib\index.js`。 |
 | 设置里找不到 dsh-task-notify 的配置行 | 卡片挂在「插件 → 已安装」的**行配置**上，不是独立的设置页（宿主 rc.1 后只保留 `plugins.row.config` 这一个 slot）。若整行没有入口，先确认插件已挂载（状态路由 200）。 |
 | 卡片写着「桥未注册」 | 服务端没跑或版本对不上：`/api/dsh-task-notify-settings/describe` 是 404 就是桥没注册，先查 `/_task-notify/status` 是否 200。 |
+| DSH 启动即崩，报 `invalid plugin, expect function or object with an "apply" method, received undefined` | `lib/client.js` 的工厂**没有 `return module.exports`**。宿主 cordis 拿工厂返回值当插件对象，只往 `exports` 上挂而不 return，得到 undefined 就崩。宿主自己 grep 不到这个字符串（它在 `app.asar/app.asar` 内层），错误原文见 `%APPDATA%\@deepseek-ai\dsh-desktop\logs\crash-*-web-boot.log`。`test/client.mjs` 里已加断言兜这条：`factory()` 的返回值必须有 `apply`。 |
 
 ## 文件
 

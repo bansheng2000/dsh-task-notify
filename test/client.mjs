@@ -54,11 +54,8 @@ function loadExports(seed) {
   const fakeWindow = {
     __ModuleLoader__: { load: (entry) => { captured = entry; } },
   };
-  // 工厂把导出挂在自己的 module.exports 上，又不返回它 —— 在赋值前插一行把对象递出来。
-  const marker = "exports.apply = apply;";
-  assert.ok(SOURCE.includes(marker), "client.js 应有 exports.apply = apply;");
-  const runnable = SOURCE.replace(marker, "globalThis.__tnExports = exports;\n    " + marker);
-  new Function("window", runnable)(fakeWindow);
+  new Function("window", SOURCE)(fakeWindow);
+  assert.ok(captured, "client.js 应调 window.__ModuleLoader__.load");
 
   const queue = [...seed];
   const react = {
@@ -69,8 +66,12 @@ function loadExports(seed) {
     useEffect: () => {},
     useCallback: (fn) => fn,
   };
-  captured.factory((spec) => (spec === "react" ? react : { jsx: (type, props) => ({ type, props }) }));
-  return globalThis.__tnExports;
+  // 工厂必须 return module.exports：宿主 cordis 拿返回值当插件，
+  // 不 return 就是 "invalid plugin ... received undefined"，启动即崩。
+  const plugin = captured.factory((spec) => (spec === "react" ? react : { jsx: (type, props) => ({ type, props }) }));
+  assert.equal(typeof plugin?.apply, "function", "factory 必须 return module.exports");
+  assert.equal(typeof plugin?.inject, "object", "inject 是数组");
+  return plugin;
 }
 
 // 1) 入口形态：ModuleLoader.load + apply/inject 导出，seam 只有 slots
