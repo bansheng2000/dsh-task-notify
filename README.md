@@ -97,14 +97,20 @@ curl http://127.0.0.1:19387/_task-notify/status
 {
   "dsh": { "profile": { "bundles": ["...", "dsh-task-notify"] } },
   "dependencies": {
-    "dsh-task-notify": "github:bansheng2000/dsh-task-notify"
+    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.2.1"
   }
 }
 ```
 
-> 本机开发时把依赖写成 `file:E:/文档/deepseek-harness/dsh-task-notify` 指向本地仓库；
-> 别的机器用上面这条 `github:` 规格装。路径必须是**绝对正斜杠**路径，
-> 相对路径会报 `ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND`。
+> 规格选择（三条都实测过，本机 `pnpm v11.7.0`）：
+>
+> | 规格 | 场景 | 说明 |
+> | --- | --- | --- |
+> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.2.1` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
+> | `github:bansheng2000/dsh-task-notify` | 追 `main` 最新提交 | pnpm 会走 `git ls-remote git+ssh://git@github.com/...`，没配 ssh key 的机器 exit 128。修法：`git config --global url."https://github.com/".insteadOf "git+ssh://git@github.com/"` |
+> | `file:E:/文档/deepseek-harness/dsh-task-notify` | 本机开发 | 必须**绝对正斜杠**路径，相对路径报 `ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND` |
+>
+> `#semver:` 前缀（`...#semver:^0.2.1`）只对 `github:` / `git+https:` 规格有意义，tarball URL 用版本号本身固定。
 
 2. 在 profile 目录装依赖：
 
@@ -127,8 +133,10 @@ bundle 自带的 `cordis.patch.yml` 用 `- insert:` 创建 loader 条目，**不
 
 ```powershell
 cd C:\Users\12576\.dsh\profiles\desktop
-pnpm update dsh-task-notify   # 裸 github: 规格重新解析 main 最新提交
-# 想按版本升级：把依赖写成 github:bansheng2000/dsh-task-notify#semver:^0.2.0，配合 tag
+# tarball 规格：先把依赖里的版本号改掉（v0.2.1 → 新版本），再
+pnpm install
+# 裸 github: 规格跟 main，无需改任何东西
+pnpm update dsh-task-notify
 ```
 
 然后重启 DSH——不重启内存里跑的还是旧代码。
@@ -166,6 +174,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 | 现象 | 原因 / 处理 |
 | --- | --- |
 | `/_task-notify/status` 返回 404 | `apply()` 没跑：包没进 profile、bundles 没加、或 patch 写成了顶层扁平 `- id:`。查 plugin manager 的 `list_plugins`，应有 `include:task-notify` + `fiberPhase: active`。 |
+| 加载时报 `Cannot find package '@deepseek-ai/schemastery'` | `@deepseek-ai/schemastery` 同时写进 `dependencies` 和 `peerDependencies` 时，pnpm 按 peer 处理、**不会**装进依赖树。本机因别的插件把它提升到 profile 根而假绿，干净机器上必炸。宿主侧 bare import 只能写进 `dependencies`，`peerDependencies` 留给宿主运行时自己提供的东西。 |
 | `skippedUnbound` 一直涨 | `targets` / `workspaces` 缺 botId 或 targetId（半截配置会被整项丢弃），或该 `botId` 不在 `bots` 里 / `channel` 对不上。对照状态路由的 `bots` 核对。 |
 | `notified` 涨但某个渠道没收到 | 单个目标失败不会影响其它目标，但只会在日志里留一条 warn（`send not accepted: ...` / `send failed: ...`，带 `code`）。按 `targetId` 搜日志定位是哪个目标。 |
 | 微信 notified 但没收到 | `{sent:true}` 只代表平台接口接受，不代表送达。微信主动投递还需要用户消息里携带过的 `context_token`；先给机器人发一条微信消息再触发。 |
