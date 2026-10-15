@@ -121,7 +121,7 @@ assert.equal(base.formatWorkspaces(null), "");
 const tree = base.NotifyCard({});
 const nodes = walk(tree);
 const boxes = nodes.filter((node) => node.type === "input" && node.props?.type === "checkbox");
-assert.equal(boxes.length, 1 + 7 + 2 + 2 + 5 + 2, "总开关 + 七个状态 + 跳过子代理 + 待答问题 + 每个收件目标一个启用勾 + 五个正文字段 + 两个见过的工作区");
+assert.equal(boxes.length, 1 + 7 + 2 + 2 + 6 + 2, "总开关 + 七个状态 + 跳过子代理 + 待答问题 + 每个收件目标一个启用勾 + 六个正文字段 + 两个见过的工作区");
 assert.equal(boxes[0].props.checked, true, "总开关跟着 enabled");
 assert.deepEqual(
   boxes.slice(1, 8).map((node) => node.props.checked),
@@ -206,16 +206,16 @@ try {
 }
 
 // 10) 正文可配（「通知里包含」）+ 工作区可勾（「通知哪些工作区」）：勾一下就要写回配置
-const fieldBoxes = boxes.slice(10, 15);
-assert.deepEqual(fieldBoxes.map((node) => node.props.checked), [true, true, true, false, false], "字段缺省：标题/工作区/原因勾上，会话 id 与时间不勾");
-const wsBoxes = boxes.slice(15, 17);
+const fieldBoxes = boxes.slice(10, 16);
+assert.deepEqual(fieldBoxes.map((node) => node.props.checked), [true, true, true, true, false, false], "字段缺省：标题/工作区/原因/答复首句勾上，会话 id 与时间不勾");
+const wsBoxes = boxes.slice(16, 18);
 assert.deepEqual(wsBoxes.map((node) => node.props.checked), [true, false], "工作区勾选跟着 onlyWorkspaces（只勾了 alpha）");
 
 let posted = null;
 const realFetchMutate = globalThis.fetch;
 globalThis.fetch = (url, init) => { posted = JSON.parse(init.body); return Promise.resolve({ status: 200, text: async () => JSON.stringify({ ok: true, value: DESCRIBED }) }); };
 try {
-  fieldBoxes[3].props.onChange({ target: { checked: true } });
+  fieldBoxes[4].props.onChange({ target: { checked: true } });
   assert.equal(posted.ops[0].path.join("."), "rules.fields", "勾字段写 rules.fields");
   assert.equal(posted.ops[0].value.sessionId, true, "勾上会话 id");
   assert.equal(posted.ops[0].value.title, true, "其它字段原样保留");

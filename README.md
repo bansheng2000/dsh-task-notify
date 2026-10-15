@@ -11,7 +11,8 @@
 - **去重**：会话级——同一 `sessionId` + 同一结束原因只推一次（整批算一次，不是每个目标一次）。
 - **待答问题也提示**：会话调 `ask_user_question` 要你做选择时推一条 ❓ 通知（只旁听不抢答，回答权原样交回 Web / dsh-im），单独用 `notifyQuestions` 开关控制。
 - **哪些工作区发**：`onlyWorkspaces`（或卡片上勾工作区）为空 = 全部工作区都发；非空则先按工作区拦一道，被拦下的算 `filteredWorkspace`，不算失败。卡片里的勾选列表**读宿主登记的全部工作区**（`~/.dsh/storages/workspace.json`），不是只列跑过的。
-- **正文可裁剪**：`fields` 决定正文带「会话标题 / 工作区 / 原因 / 会话 / 时间」哪几项，全关也仍有一条首行（谁、什么状态）。
+- **正文可裁剪**：`fields` 决定正文带「会话标题 / 工作区 / 原因 / 答复首句 / 会话 / 时间」哪几项，全关也仍有一条首行（谁、什么状态）。
+- **顺带一句结论**：`fields.brief`（缺省开）把本轮最后一条回复的首句摘进正文「内容:」那行——插件在本地读会话事件流，**不调模型、不花 token**。
 - **设置里可改**：插件自带设置卡片（设置 → 插件 → dsh-task-notify → 行配置），开关、状态过滤、正文包含哪些字段、通知哪些工作区、目标列表、工作区规则都能改，**落盘即生效，不用重启**。
 
 ## 通知长什么样
@@ -27,6 +28,7 @@
 ⚠️ 任务已取消 | task-notify | 微信文案微调
 工作区: ziyongchajian
 原因: 用户主动终止
+内容: 改完了，通知里的会话改成标题了。  # 开了 fields.brief（缺省开）才有：本轮最后一条回复的首句
 会话: 微信文案微调                  # 开了 fields.sessionId 才有：会话标题，没标题才退回裸 id
 时间: 2026-10-14T14:22:52.983Z      # 开了 fields.time 才有
 ```
@@ -34,6 +36,9 @@
 首行第三段是**会话标题**——就是侧栏会话列表里那一行文字，**完整不截断**，用来认出「这次在干什么」。它读会话事件流里最后一条 `session/title`（宿主 `sessionTitle` 服务读的是同一份数据），所以**你手动重命名后的名字就是它**。
 
 打开 `fields.sessionId` 时，正文那行「会话:」也给同一个标题，只有标题还没生成时才退回裸 session id（方便配 DSH 的 `/session` 命令）。
+
+「内容:」那行是本轮**最后一条回复的首句**（`fields.brief`，缺省开）：插件直接读会话事件流里的 `assistant/message`，剥掉代码块与 markdown、切到第一个句末标点（`。！？；`）、超 80 字截断加 `…`。**纯本地摘取，不调模型、不花一个 token**。
+本轮被打断（`interrupted`）时这行不写——宁可不给，也不拿中途某一步的解说冒充本轮结论。与 dsh-im 同源，所以侧栏 / 微信里显示什么，这里就写什么。
 
 标题取不到时，首行退回工作区名（不拿 session id 凑数，那串 uuid 只会占地方看不懂）。
 
@@ -109,11 +114,12 @@ config:
     onlyWorkspaces:
       - ziyongchajian
 
-    # 通知正文带哪些字段。标题/工作区/原因缺省带，会话与时间缺省不带。
+    # 通知正文带哪些字段。标题/工作区/原因/答复首句缺省带，会话与时间缺省不带。
     fields:
       title: true          # 首行的会话标题（关掉则退回工作区名）
       workspace: true      # 正文「工作区: X」
       reason: true         # 失败/取消的「原因: X」
+      brief: true          # 正文「内容: X」= 本轮最后一条回复的首句（本地摘取，0 token）
       sessionId: true      # 正文「会话: 会话标题」（没标题才退回 session-xxx）
       time: true           # 正文「时间: ISO」
 
@@ -135,7 +141,7 @@ config:
 
 两个「先拦一道」的开关，顺序是：**工作区**（`onlyWorkspaces` 非空且不含当前工作区 → 直接 `return`，计数 `filteredWorkspace`）→ 状态开关（`statuses`，计数 `filtered`）→ 去重（计数 `deduped`）→ 找目标（找不到，计数 `skippedUnbound`）→ 真发（成功计 `notified`，失败计 `failed`）。`onlyWorkspaces` 的空缺省是「全部发」，所以只勾工作区不会把默认目标丢掉。
 
-`fields` 只影响正文，不影响投递与去重：全关掉时正文只剩首行（`✅ | task-notify | 工作区名`），适合只想知道「哪台机器跑完了」。`fields.sessionId` 打开时那行给的是会话标题（重命名后就是新名字），只有标题还没生成才退回裸 id。
+`fields` 只影响正文，不影响投递与去重：全关掉时正文只剩首行（`✅ | task-notify | 工作区名`），适合只想知道「哪台机器跑完了」。`fields.brief` 摘的是事件流里已有的文本，只往外发、不写回会话，所以不会在后续每轮里重复计费。`fields.sessionId` 打开时那行给的是会话标题（重命名后就是新名字），只有标题还没生成才退回裸 id。
 
 ### 在设置里改（推荐）
 
@@ -144,7 +150,7 @@ config:
 卡片上能改的东西与上面配置一一对应：
 
 - 总开关「启用通知」、七种结束原因的勾选、「跳过子代理」、「会话要你选择时也提示」、消息格式；
-- 「通知里包含」：正文带哪些字段（会话标题 / 工作区 / 原因 / 会话 / 时间），逐项勾；
+- 「通知里包含」：正文带哪些字段（会话标题 / 工作区 / 原因 / 答复首句 / 会话 / 时间），逐项勾；
 - 「通知哪些工作区」：把见过的工作区列出来勾（括号里是结束次数）。一个都不勾 = 全部工作区都发；
 - 投递目标列表（增删改）：启用勾、通道下拉（括号里是该通道的账户数）、`botId`、`targetId`，「选收件人」按钮会列出该账户下 dsh-im 已有的收件目标让你点。
   - 这一行的 `botId` 是空的时候点它，卡片会直接告诉你缺什么（不会静默无反应）；
@@ -204,7 +210,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 {
   "dsh": { "profile": { "bundles": ["...", "dsh-task-notify"] } },
   "dependencies": {
-    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.7.1"
+    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.8.0"
   }
 }
 ```
@@ -213,7 +219,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 >
 > | 规格 | 场景 | 说明 |
 > | --- | --- | --- |
-> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.7.1` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
+> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.8.0` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
 > | `github:bansheng2000/dsh-task-notify` | 追 `main` 最新提交 | pnpm 会走 `git ls-remote git+ssh://git@github.com/...`，没配 ssh key 的机器 exit 128。修法：`git config --global url."https://github.com/".insteadOf "git+ssh://git@github.com/"` |
 > | `file:E:/文档/deepseek-harness/dsh-task-notify` | 本机开发 | 必须**绝对正斜杠**路径，相对路径报 `ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND` |
 >
@@ -241,7 +247,7 @@ bundle 自带的 `cordis.patch.yml` 用 `- insert:` 创建 loader 条目，**不
 
 ```powershell
 cd C:\Users\12576\.dsh\profiles\desktop
-# tarball 规格：先把依赖里的版本号改掉（v0.7.1 → 新版本），再
+# tarball 规格：先把依赖里的版本号改掉（v0.8.0 → 新版本），再
 pnpm install
 # 裸 github: 规格跟 main，无需改任何东西
 pnpm update dsh-task-notify
@@ -254,7 +260,7 @@ pnpm update dsh-task-notify
 ```powershell
 # 1) 插件自检（不依赖 DSH 宿主）
 cd E:\文档\deepseek-harness\dsh-task-notify
-& "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\selftest.mjs   # 服务端，53 项
+& "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\selftest.mjs   # 服务端，54 项
 & "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\client.mjs     # 设置卡片（含工厂 return、按钮点击、桥失败三类回归）
 # 期望：dsh-task-notify selftest: ok / dsh-task-notify client selftest: ok
 
@@ -321,6 +327,6 @@ lib/client.js      设置卡片（window.__ModuleLoader__.load 形态，挂 plug
 cordis.patch.yml   bundle patch（- insert: 创建 loader 条目 + 配置示例）
 package.json       main=lib/index.js, exports./client=lib/client.js, dsh.bundle.patch / dsh.client
 README.md          本文件
-test/selftest.mjs  服务端自检（53 项断言）
+test/selftest.mjs  服务端自检（54 项断言）
 test/client.mjs    设置卡片自检（假 window + 假 react，渲染成纯对象树断言；含按钮点击、字段/工作区勾选写回、桥失败的回归用例，11 组）
 ```

@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const mod = await import("../lib/index.js");
-const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, formatMessage, statusEnabled, storedRules, workspaceAllowed, FIELD_DEFAULTS } = mod;
+const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, formatMessage, statusEnabled, storedRules, workspaceAllowed, answerBrief, firstSentence, FIELD_DEFAULTS } = mod;
 
 // 「全部工作区」来自宿主 storage 登记表：默认指到一个不存在的目录，免得读到本机
 // 真实工作区把断言变成机器相关（最后一个用例再单独喂真文件）。
@@ -871,6 +871,7 @@ const QUESTIONS = [
   const full = formatMessage({
     label: "✅ 任务完成", title: "标题", cwd: "E:/x/alpha", phrase: "报错",
     sessionId: "session-1", at: "2026-10-14T00:00:00.000Z", fields: { sessionId: true, time: true },
+    brief: "改完了，① 会话标题已修好。",
   });
   assert.equal(full.split(NL)[0], "✅ 任务完成 | task-notify | 标题");
   assert.ok(full.includes("工作区: alpha"), full);
@@ -881,12 +882,36 @@ const QUESTIONS = [
     "没有标题时才退回裸 session id",
   );
   assert.ok(full.includes("时间: 2026-10-14T00:00:00.000Z"), full);
+  assert.ok(full.includes("内容: 改完了，① 会话标题已修好。"), full);
+  assert.ok(
+    !formatMessage({ label: "✅", title: "t", cwd: "E:/x/alpha", phrase: "", fields: { brief: false }, brief: "不该出现。" }).includes("内容:"),
+    "brief 关掉就不带内容行",
+  );
   assert.equal(
     formatMessage({ label: "✅", title: "", cwd: "E:/x/alpha", phrase: "", fields: { title: false, workspace: false, reason: false } }),
     "✅ | task-notify | alpha",
     "全关只剩首行",
   );
   assert.equal(formatMessage({ label: "✅", cwd: "", phrase: "" }), ["✅ | task-notify | unknown", "工作区: unknown"].join(NL), "缺省仍带工作区行");
+}
+
+// 50b) answerBrief / firstSentence：从事件流本地摘本轮答复首句（不调模型、0 token）
+{
+  const events = [
+    { type: "assistant/message", data: { turn: 1, message: { content: [{ type: "text", text: "先说明一下。后面还有话。" }] } } },
+    { type: "assistant/message", surfaceOp: "append", data: { turn: 2, interrupted: true, message: { content: [{ type: "text", text: "半截话" }] } } },
+    { type: "assistant/message", surfaceOp: "append", data: { turn: 3, message: { content: [{ type: "text", text: "```js\nconst a = 1;\n```\n改完了，① 会话标题已修好。" }, { type: "tool_use", name: "x" }] } } },
+  ];
+  assert.equal(answerBrief({ events }, 3), "改完了，① 会话标题已修好。", "丢代码块、只取 text 块、切到第一个句末");
+  assert.equal(answerBrief({ events }, 1), "先说明一下。", "只看本轮；surfaceOp 缺失也认");
+  assert.equal(answerBrief({ events }, 2), "", "最后一条被打断就不给摘要，不拿中途解说冒充结论");
+  assert.equal(answerBrief({ snapshotEvents: () => events }, 3), "改完了，① 会话标题已修好。", "snapshotEvents 形态同样认");
+  assert.equal(answerBrief({ events: [] }, 3), "", "本轮没有回复就是空");
+  assert.equal(answerBrief(null, 1), "", "没有会话也不炸");
+  const long = firstSentence("甲".repeat(200));
+  assert.equal(long.length, 80, "超长首句截到 80 字符");
+  assert.ok(long.endsWith("…"), "截断要带省略号");
+  assert.equal(firstSentence(""), "", "空文本给空串");
 }
 
 // 51) onlyWorkspaces 真的拦投递（计入 filteredWorkspace，不是静默丢），并把见过的工作区报给卡片
@@ -918,6 +943,7 @@ const QUESTIONS = [
   const events = [
     { type: "session/title", data: { title: "自动生成的旧标题", source: { kind: "system" } } },
     { type: "session/title", data: { title: "DSH桌面版本地代理模型选择插件", source: { kind: "user" } } },
+    { type: "assistant/message", surfaceOp: "append", data: { turn: 1, message: { content: [{ type: "text", text: "改完了，通知里的会话改成标题了。" }] } } },
   ];
   const header = { id: "s1", cwd: "E:/x/a", type: "session", version: 7, createdAt: 0, isSeeded: false, delegationDepth: 0 };
   assert.equal(sessionTitle({}, { header, events }), "DSH桌面版本地代理模型选择插件", "取最后一条 session/title");
@@ -933,6 +959,7 @@ const QUESTIONS = [
   assert.ok(text.startsWith("✅ 任务完成 | task-notify | DSH桌面版本地代理模型选择插件"), text);
   assert.ok(text.includes("会话: DSH桌面版本地代理模型选择插件"), "「会话」行也是重命名后的标题: " + text);
   assert.ok(!text.includes("会话: s1"), "不把裸 session id 塞进通知: " + text);
+  assert.ok(text.includes("内容: 改完了，通知里的会话改成标题了。"), "turn/end → answerBrief → deliver 接线：正文带本轮答复首句（本地摘取，0 token）: " + text);
 }
 
 // 53) 「通知哪些工作区」列宿主的全部工作区（storage 登记表），不只是跑过的
