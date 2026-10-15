@@ -1,9 +1,18 @@
 // dsh-task-notify 的自检：不进 DSH 宿主，用假 ctx / 假 dshIm 验证判定、文案、去重、多渠道扇出、未绑定分支。
 // 跑法：node test/selftest.mjs
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 
 const mod = await import("../lib/index.js");
 const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, formatMessage, statusEnabled, storedRules, workspaceAllowed, FIELD_DEFAULTS } = mod;
+
+// 「全部工作区」来自宿主 storage 登记表：默认指到一个不存在的目录，免得读到本机
+// 真实工作区把断言变成机器相关（最后一个用例再单独喂真文件）。
+const NO_STORAGES = fileURLToPath(new URL("./_no_storages/", import.meta.url));
+process.env.DSH_STORAGES_DIR = NO_STORAGES;
 
 
 /** 造一个最小 ctx：只存 on / inject，dshIm 与 logger 可注入。 */
@@ -866,7 +875,11 @@ const QUESTIONS = [
   assert.equal(full.split(NL)[0], "✅ 任务完成 | task-notify | 标题");
   assert.ok(full.includes("工作区: alpha"), full);
   assert.ok(full.includes("原因: 报错"), full);
-  assert.ok(full.includes("会话: session-1"), full);
+  assert.ok(full.includes("会话: 标题"), "「会话」行给人话标题而不是裸 id: " + full);
+  assert.ok(
+    formatMessage({ label: "✅", title: "", cwd: "E:/x/alpha", phrase: "", sessionId: "session-9", fields: { sessionId: true } }).includes("会话: session-9"),
+    "没有标题时才退回裸 session id",
+  );
   assert.ok(full.includes("时间: 2026-10-14T00:00:00.000Z"), full);
   assert.equal(
     formatMessage({ label: "✅", title: "", cwd: "E:/x/alpha", phrase: "", fields: { title: false, workspace: false, reason: false } }),
@@ -898,6 +911,62 @@ const QUESTIONS = [
   const describe = await callBridge(ctx, BRIDGE + "/describe");
   assert.equal(describe.body.value.observed.length, 2, "桥的 describe 也要给见过的工作区");
   assert.deepEqual(describe.body.value.observed.map((item) => item.name).sort(), ["alpha", "beta"], "两个工作区都在（次数相同按见识先后）");
+}
+
+// 52) 会话标题：事件流里最后一条 session/title（用户重命名）就是通知里的名字
+{
+  const events = [
+    { type: "session/title", data: { title: "自动生成的旧标题", source: { kind: "system" } } },
+    { type: "session/title", data: { title: "DSH桌面版本地代理模型选择插件", source: { kind: "user" } } },
+  ];
+  const header = { id: "s1", cwd: "E:/x/a", type: "session", version: 7, createdAt: 0, isSeeded: false, delegationDepth: 0 };
+  assert.equal(sessionTitle({}, { header, events }), "DSH桌面版本地代理模型选择插件", "取最后一条 session/title");
+  assert.equal(sessionTitle({}, { header, snapshotEvents: () => events }), "DSH桌面版本地代理模型选择插件", "snapshotEvents 形态一样认");
+  assert.equal(sessionTitle({ sessionTitle: { get: () => ({ title: "服务给的标题" }) } }, { header }), "服务给的标题", "没有事件才回退服务");
+
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, ctx._setConfig(binding({ fields: { sessionId: true } })));
+  ctx._emit("session/event", { header, events }, turnEnd(1, { kind: "completed" }));
+  await settle();
+  const text = im.calls[0].text;
+  assert.ok(text.startsWith("✅ 任务完成 | task-notify | DSH桌面版本地代理模型选择插件"), text);
+  assert.ok(text.includes("会话: DSH桌面版本地代理模型选择插件"), "「会话」行也是重命名后的标题: " + text);
+  assert.ok(!text.includes("会话: s1"), "不把裸 session id 塞进通知: " + text);
+}
+
+// 53) 「通知哪些工作区」列宿主的全部工作区（storage 登记表），不只是跑过的
+{
+  const dir = mkdtempSync(join(tmpdir(), "task-notify-ws-"));
+  try {
+    writeFileSync(join(dir, "workspace.json"), JSON.stringify({
+      unit: { name: "workspace", version: 2 },
+      tables: {
+        workspaces: {
+          w1: { path: "E:/p/alpha", title: "自制插件", sessionIds: ["s1", "s2"] },
+          w2: { path: "E:/p/beta", title: "", sessionIds: [] },
+          w3: { path: "   ", title: "空路径不该出现", sessionIds: [] },
+        },
+      },
+    }));
+    process.env.DSH_STORAGES_DIR = dir;
+    const im = fakeIm();
+    const ctx = makeCtx({ dshIm: im.service });
+    apply(ctx, ctx._setConfig(binding()));
+    let body = await readStatus(ctx, "GET");
+    assert.deepEqual(body.observed.map((item) => item.name), ["alpha", "beta"], "登记在册的两个都列出来（按会话数从多到少），空路径丢掉");
+    assert.equal(body.observed[0].title, "自制插件", "带上工作区标题");
+    assert.equal(body.observed[0].count, 2, "括号里的数字是会话数");
+    const described = await callBridge(ctx, BRIDGE + "/describe");
+    assert.equal(described.body.value.observed.length, 2, "桥的 describe 用同一份清单");
+
+    ctx._emit("session/event", session("s9", "E:/p/gamma"), turnEnd(1, { kind: "completed" }));
+    await settle();
+    body = await readStatus(ctx, "GET");
+    assert.deepEqual(body.observed.map((item) => item.name), ["alpha", "gamma", "beta"], "跑过但没登记的工作区也补进来");
+  } finally {
+    process.env.DSH_STORAGES_DIR = NO_STORAGES;
+  }
 }
 
 console.log("dsh-task-notify selftest: ok");

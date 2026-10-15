@@ -25,7 +25,7 @@ const DESCRIBED = {
     onlyWorkspaces: ["alpha"],
   },
   observed: [
-    { name: "alpha", cwd: "E:/p/alpha", count: 3, last: "session-1" },
+    { name: "alpha", cwd: "E:/p/alpha", title: "自制插件", count: 3, last: "session-1" },
     { name: "beta", cwd: "E:/p/beta", count: 1, last: "session-2" },
   ],
   dshImInstalled: true,
@@ -143,6 +143,7 @@ const flat = JSON.stringify(tree);
 assert.ok(flat.includes("tgt_1a2b3c4d5e6f7890"), "已填的 targetId 显示在输入框里");
 assert.ok(flat.includes("ziyongchajian=weixin"), "工作区规则回填到 textarea");
 assert.ok(flat.includes("已推送 3 · 未绑定跳过 1 · 状态过滤 2 · 去重 4 · 失败 0"));
+assert.ok(flat.includes("alpha · 自制插件（3 次）"), "工作区勾选项带标题与次数");
 
 // 6) dsh-im 没在线账户时给提示，而不是空白卡片
 const offline = loadExports([

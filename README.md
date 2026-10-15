@@ -10,8 +10,8 @@
 - **未绑定 / 账户未连接**：跳过 + 记日志 + 计数，不报错打断监听。
 - **去重**：会话级——同一 `sessionId` + 同一结束原因只推一次（整批算一次，不是每个目标一次）。
 - **待答问题也提示**：会话调 `ask_user_question` 要你做选择时推一条 ❓ 通知（只旁听不抢答，回答权原样交回 Web / dsh-im），单独用 `notifyQuestions` 开关控制。
-- **哪些工作区发**：`onlyWorkspaces`（或卡片上勾工作区）为空 = 全部工作区都发；非空则先按工作区拦一道，被拦下的算 `filteredWorkspace`，不算失败。
-- **正文可裁剪**：`fields` 决定正文带「会话标题 / 工作区 / 原因 / 会话 id / 时间」哪几项，全关也仍有一条首行（谁、什么状态）。
+- **哪些工作区发**：`onlyWorkspaces`（或卡片上勾工作区）为空 = 全部工作区都发；非空则先按工作区拦一道，被拦下的算 `filteredWorkspace`，不算失败。卡片里的勾选列表**读宿主登记的全部工作区**（`~/.dsh/storages/workspace.json`），不是只列跑过的。
+- **正文可裁剪**：`fields` 决定正文带「会话标题 / 工作区 / 原因 / 会话 / 时间」哪几项，全关也仍有一条首行（谁、什么状态）。
 - **设置里可改**：插件自带设置卡片（设置 → 插件 → dsh-task-notify → 行配置），开关、状态过滤、正文包含哪些字段、通知哪些工作区、目标列表、工作区规则都能改，**落盘即生效，不用重启**。
 
 ## 通知长什么样
@@ -27,13 +27,15 @@
 ⚠️ 任务已取消 | task-notify | 微信文案微调
 工作区: ziyongchajian
 原因: 用户主动终止
-会话: session-6f2292c8-…            # 开了 fields.sessionId 才有
+会话: 微信文案微调                  # 开了 fields.sessionId 才有：会话标题，没标题才退回裸 id
 时间: 2026-10-14T14:22:52.983Z      # 开了 fields.time 才有
 ```
 
-首行第三段是**会话标题**——就是侧栏会话列表里那一行文字（宿主 `sessionTitle` 服务折叠出的最新标题），**完整不截断**，用来认出「这次在干什么」。
+首行第三段是**会话标题**——就是侧栏会话列表里那一行文字，**完整不截断**，用来认出「这次在干什么」。它读会话事件流里最后一条 `session/title`（宿主 `sessionTitle` 服务读的是同一份数据），所以**你手动重命名后的名字就是它**。
 
-标题服务没挂载、或标题还是空白时，首行退回工作区名（不拿 session id 凑数，那串 uuid 只会占地方看不懂）。
+打开 `fields.sessionId` 时，正文那行「会话:」也给同一个标题，只有标题还没生成时才退回裸 session id（方便配 DSH 的 `/session` 命令）。
+
+标题取不到时，首行退回工作区名（不拿 session id 凑数，那串 uuid 只会占地方看不懂）。
 
 各渠道收到的文案完全一致（同一 format 下）。
 
@@ -107,12 +109,12 @@ config:
     onlyWorkspaces:
       - ziyongchajian
 
-    # 通知正文带哪些字段。标题/工作区/原因缺省带，会话 id 与时间缺省不带。
+    # 通知正文带哪些字段。标题/工作区/原因缺省带，会话与时间缺省不带。
     fields:
       title: true          # 首行的会话标题（关掉则退回工作区名）
       workspace: true      # 正文「工作区: X」
       reason: true         # 失败/取消的「原因: X」
-      sessionId: true      # 正文「会话: session-xxx」（配合 DSH 的 /session 命令）
+      sessionId: true      # 正文「会话: 会话标题」（没标题才退回 session-xxx）
       time: true           # 正文「时间: ISO」
 
     # 按工作区覆盖目标列表。键可以是完整 cwd，也可以只写工作区目录名。
@@ -133,7 +135,7 @@ config:
 
 两个「先拦一道」的开关，顺序是：**工作区**（`onlyWorkspaces` 非空且不含当前工作区 → 直接 `return`，计数 `filteredWorkspace`）→ 状态开关（`statuses`，计数 `filtered`）→ 去重（计数 `deduped`）→ 找目标（找不到，计数 `skippedUnbound`）→ 真发（成功计 `notified`，失败计 `failed`）。`onlyWorkspaces` 的空缺省是「全部发」，所以只勾工作区不会把默认目标丢掉。
 
-`fields` 只影响正文，不影响投递与去重：全关掉时正文只剩首行（`✅ | task-notify | 工作区名`），适合只想知道「哪台机器跑完了」。
+`fields` 只影响正文，不影响投递与去重：全关掉时正文只剩首行（`✅ | task-notify | 工作区名`），适合只想知道「哪台机器跑完了」。`fields.sessionId` 打开时那行给的是会话标题（重命名后就是新名字），只有标题还没生成才退回裸 id。
 
 ### 在设置里改（推荐）
 
@@ -142,7 +144,7 @@ config:
 卡片上能改的东西与上面配置一一对应：
 
 - 总开关「启用通知」、七种结束原因的勾选、「跳过子代理」、「会话要你选择时也提示」、消息格式；
-- 「通知里包含」：正文带哪些字段（会话标题 / 工作区 / 原因 / 会话 id / 时间），逐项勾；
+- 「通知里包含」：正文带哪些字段（会话标题 / 工作区 / 原因 / 会话 / 时间），逐项勾；
 - 「通知哪些工作区」：把见过的工作区列出来勾（括号里是结束次数）。一个都不勾 = 全部工作区都发；
 - 投递目标列表（增删改）：启用勾、通道下拉（括号里是该通道的账户数）、`botId`、`targetId`，「选收件人」按钮会列出该账户下 dsh-im 已有的收件目标让你点。
   - 这一行的 `botId` 是空的时候点它，卡片会直接告诉你缺什么（不会静默无反应）；
@@ -202,7 +204,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 {
   "dsh": { "profile": { "bundles": ["...", "dsh-task-notify"] } },
   "dependencies": {
-    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.7.0"
+    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.7.1"
   }
 }
 ```
@@ -211,7 +213,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 >
 > | 规格 | 场景 | 说明 |
 > | --- | --- | --- |
-> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.7.0` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
+> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.7.1` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
 > | `github:bansheng2000/dsh-task-notify` | 追 `main` 最新提交 | pnpm 会走 `git ls-remote git+ssh://git@github.com/...`，没配 ssh key 的机器 exit 128。修法：`git config --global url."https://github.com/".insteadOf "git+ssh://git@github.com/"` |
 > | `file:E:/文档/deepseek-harness/dsh-task-notify` | 本机开发 | 必须**绝对正斜杠**路径，相对路径报 `ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND` |
 >
@@ -239,7 +241,7 @@ bundle 自带的 `cordis.patch.yml` 用 `- insert:` 创建 loader 条目，**不
 
 ```powershell
 cd C:\Users\12576\.dsh\profiles\desktop
-# tarball 规格：先把依赖里的版本号改掉（v0.7.0 → 新版本），再
+# tarball 规格：先把依赖里的版本号改掉（v0.7.1 → 新版本），再
 pnpm install
 # 裸 github: 规格跟 main，无需改任何东西
 pnpm update dsh-task-notify
@@ -252,7 +254,7 @@ pnpm update dsh-task-notify
 ```powershell
 # 1) 插件自检（不依赖 DSH 宿主）
 cd E:\文档\deepseek-harness\dsh-task-notify
-& "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\selftest.mjs   # 服务端，51 项
+& "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\selftest.mjs   # 服务端，53 项
 & "F:\Programs\DeepSeek Harness\DeepSeek Harness.exe" test\client.mjs     # 设置卡片（含工厂 return、按钮点击、桥失败三类回归）
 # 期望：dsh-task-notify selftest: ok / dsh-task-notify client selftest: ok
 
@@ -306,6 +308,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 | 卡片写着「桥未注册」 | 服务端没跑或版本对不上：`/api/dsh-task-notify-settings/describe` 是 404 就是桥没注册，先查 `/_task-notify/status` 是否 200。 |
 | 点「选收件人」没反应（v0.6.1 修） | 两个原因：① 这一行的 `botId` 是空的（旧版直接 `return`，什么都不做）—— 点上面的「+ 渠道 · …」按钮会自动填上；② botId 填了但 dsh-im 侧一条收件目标都没有（新机器常见），要去 设置 → 集成 → 该机器人 → 投递设置 →「从已聊过的会话选择」先建一条。v0.6.1 起两种情况都会在卡片上说清原因。 |
 | 点「+ 渠道 · …」加了收件目标、卡片里却不出现（v0.7.0 修） | 桥和 `/_task-notify/status` 原来拿**归一化后**的配置去 describe，而归一化会把 `targetId` 为空的半填行整项丢弃 —— 写盘成功、回读却是空列表，界面表现就是「点了没反应」。v0.7.0 起 describe 走 `storedRules()`（只补默认值、不丢行），归一化只留给投递路径；`/_task-notify/status` 的 `targets` 现在能看到那行空的 `targetId`。 |
+| 通知里「会话」那行是 uuid、卡片「通知哪些工作区」只列出一个（v0.7.1 修） | 标题原来只问 `ctx.sessionTitle`（本插件没 inject 到那个服务，永远拿不到）——v0.7.1 起改读会话事件流里最后一条 `session/title`，你重命名后的标题也认；工作区勾选列表原来只列跑过任务的，现在读宿主登记表 `~/.dsh/storages/workspace.json`，把全部工作区都列出来（括号里是会话数）。 |
 | 卡片上按钮毫无反应、没有红字 | v0.6.1 之前 `bridgePost` 的 fetch / JSON 解析异常会直接 reject，调用方没接住。旧版本请先看浏览器控制台；新版会把「连不上设置桥」「返回 HTTP 401 而不是 JSON」直接显示在卡片底部。 |
 | DSH 启动即崩，报 `invalid plugin, expect function or object with an "apply" method, received undefined`（v0.5.0 修） | `lib/client.js` 的工厂**没有 `return module.exports`**。宿主 cordis 拿工厂返回值当插件对象，只往 `exports` 上挂而不 return，得到 undefined 就崩。宿主自己 grep 不到这个字符串（它在 `app.asar/app.asar` 内层），错误原文见 `%APPDATA%\@deepseek-ai\dsh-desktop\logs\crash-*-web-boot.log`。`test/client.mjs` 里已加断言兜这条：`factory()` 的返回值必须有 `apply`。 |
 
@@ -318,6 +321,6 @@ lib/client.js      设置卡片（window.__ModuleLoader__.load 形态，挂 plug
 cordis.patch.yml   bundle patch（- insert: 创建 loader 条目 + 配置示例）
 package.json       main=lib/index.js, exports./client=lib/client.js, dsh.bundle.patch / dsh.client
 README.md          本文件
-test/selftest.mjs  服务端自检（51 项断言）
+test/selftest.mjs  服务端自检（53 项断言）
 test/client.mjs    设置卡片自检（假 window + 假 react，渲染成纯对象树断言；含按钮点击、字段/工作区勾选写回、桥失败的回归用例，11 组）
 ```
