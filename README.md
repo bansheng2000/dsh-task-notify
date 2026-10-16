@@ -8,7 +8,7 @@
 - **按通道 + 账户启停**：每个目标自带 `enabled`；`false` 只停用它，其它目标照发。状态路由顺手列出**哪些通道有账户**（`channels`）。
 - **文案**：首行「状态 | task-notify | 会话标题」，正文逐行「字段: 值」；失败 / 取消补一行「原因: ...」。
 - **未绑定 / 账户未连接**：跳过 + 记日志 + 计数，不报错打断监听。
-- **去重**：会话级——同一 `sessionId` + 同一结束原因只推一次（整批算一次，不是每个目标一次）。
+- **去重**：按轮——同一 `sessionId` + 同一 `turn` + 同一结束原因只推一次（只吞同一轮的事件重放；整批算一次，不是每个目标一次）。**同一会话的每一轮都会各推一条。**
 - **待答问题也提示**：会话调 `ask_user_question` 要你做选择时推一条 ❓ 通知（只旁听不抢答，回答权原样交回 Web / dsh-im），单独用 `notifyQuestions` 开关控制。
 - **哪些工作区发**：`onlyWorkspaces`（或卡片上勾工作区）为空 = 全部工作区都发；非空则先按工作区拦一道，被拦下的算 `filteredWorkspace`，不算失败。卡片里的勾选列表**读宿主登记的全部工作区**（`~/.dsh/storages/workspace.json`），不是只列跑过的。
 - **正文可裁剪**：`fields` 决定正文带「会话标题 / 工作区 / 原因 / 答复首句 / 会话 / 时间」哪几项，全关也仍有一条首行（谁、什么状态）。
@@ -139,7 +139,7 @@ config:
 
 想「换个渠道发」不用删配置：把旧目标 `enabled: false`，新目标 `enabled: true`，随时改回来。全关（或目标都被停用）= 该工作区视为未绑定，走「跳过 + 计数」那条路。
 
-两个「先拦一道」的开关，顺序是：**工作区**（`onlyWorkspaces` 非空且不含当前工作区 → 直接 `return`，计数 `filteredWorkspace`）→ 状态开关（`statuses`，计数 `filtered`）→ 去重（计数 `deduped`）→ 找目标（找不到，计数 `skippedUnbound`）→ 真发（成功计 `notified`，失败计 `failed`）。`onlyWorkspaces` 的空缺省是「全部发」，所以只勾工作区不会把默认目标丢掉。
+两个「先拦一道」的开关，顺序是：**工作区**（`onlyWorkspaces` 非空且不含当前工作区 → 直接 `return`，计数 `filteredWorkspace`）→ 状态开关（`statuses`，计数 `filtered`）→ 去重（计数 `deduped`，键 = 会话 + 轮次 + 结束原因）→ 找目标（找不到，计数 `skippedUnbound`）→ 真发（成功计 `notified`，失败计 `failed`）。`onlyWorkspaces` 的空缺省是「全部发」，所以只勾工作区不会把默认目标丢掉。
 
 `fields` 只影响正文，不影响投递与去重：全关掉时正文只剩首行（`✅ | task-notify | 工作区名`），适合只想知道「哪台机器跑完了」。`fields.brief` 摘的是事件流里已有的文本，只往外发、不写回会话，所以不会在后续每轮里重复计费。`fields.sessionId` 打开时那行给的是会话标题（重命名后就是新名字），只有标题还没生成才退回裸 id。
 
@@ -210,7 +210,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 {
   "dsh": { "profile": { "bundles": ["...", "dsh-task-notify"] } },
   "dependencies": {
-    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.8.0"
+    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.8.1"
   }
 }
 ```
@@ -219,7 +219,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 >
 > | 规格 | 场景 | 说明 |
 > | --- | --- | --- |
-> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.8.0` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
+> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.8.1` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
 > | `github:bansheng2000/dsh-task-notify` | 追 `main` 最新提交 | pnpm 会走 `git ls-remote git+ssh://git@github.com/...`，没配 ssh key 的机器 exit 128。修法：`git config --global url."https://github.com/".insteadOf "git+ssh://git@github.com/"` |
 > | `file:E:/文档/deepseek-harness/dsh-task-notify` | 本机开发 | 必须**绝对正斜杠**路径，相对路径报 `ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND` |
 >
@@ -247,7 +247,7 @@ bundle 自带的 `cordis.patch.yml` 用 `- insert:` 创建 loader 条目，**不
 
 ```powershell
 cd C:\Users\12576\.dsh\profiles\desktop
-# tarball 规格：先把依赖里的版本号改掉（v0.8.0 → 新版本），再
+# tarball 规格：先把依赖里的版本号改掉（v0.8.1 → 新版本），再
 pnpm install
 # 裸 github: 规格跟 main，无需改任何东西
 pnpm update dsh-task-notify
@@ -306,8 +306,9 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 | 微信 notified 但没收到 | `{sent:true}` 只代表平台接口接受，不代表送达。微信主动投递还需要用户消息里携带过的 `context_token`；先给机器人发一条微信消息再触发。 |
 | 某个通道 / 账户不想收了 | 把那条目标 `enabled: false`（不用删配置）；全停用等于该工作区未绑定，`skippedUnbound` 会涨、日志写 `no enabled target bound`。 |
 | 会话要你选择时没收到通知 | `notifyQuestions` 被关了；subagent 默认也不推（`skipSubagents`）。看 `questions` 计数涨没涨——涨了说明事件到了，是没绑目标或账户不在线。 |
-| 通知太吵 | `skipSubagents: true` 过滤 subagent；`statuses` 里关掉不关心的类型（如 `forked: false`、`blocked: false`）；同会话同原因本来就只推一次。fork / 多轮会推多条，确需收敛可把去重键加上 turn。 |
+| 通知太吵 | `skipSubagents: true` 过滤 subagent；`statuses` 里关掉不关心的类型（如 `forked: false`、`blocked: false`）；`onlyWorkspaces` 只留常驻工作区。多轮就是一条一轮地推（有意为之，方便「每轮干完都知道」），要彻底静音就把目标 `enabled: false`。 |
 | `filtered` 涨但一条没收到 | `statuses` 把这种结束原因关了（`filtered` 数被开关拦下的轮次）。看 `statuses` 哪项是 `false`。 |
+| 同一个会话里第二轮起就收不到通知（v0.8.1 修） | 0.8.0 及以前的去重键只有「会话 + 结束原因」、漏了轮次，于是**一个会话只会推第一条**，之后每一轮都静默进 `deduped`（新建工作区里连跑几轮最明显：只看得到第一条）。0.8.1 起键里带 `turn`：每轮各推一条，同一轮的事件重放才吞。验法：同一个会话连跑两轮，`deduped` 不涨而 `notified` 按轮涨。 |
 | 某个工作区没通知、别的有 | 检查 `workspaces` 的键：先按完整 `cwd` 匹配、再按目录名匹配，两者都没命中才回落默认 `targets`。 |
 | 改了 repo 代码但行为没变 | pnpm 装进 profile 的是真实拷贝。重新跑上面的 install，或直接改 `node_modules\dsh-task-notify\lib\index.js`。 |
 | 设置里找不到 dsh-task-notify 的配置行 | 卡片挂在「插件 → 已安装」的**行配置**上，不是独立的设置页（宿主 rc.1 后只保留 `plugins.row.config` 这一个 slot）。若整行没有入口，先确认插件已挂载（状态路由 200）。 |

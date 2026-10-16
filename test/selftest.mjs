@@ -193,11 +193,14 @@ function binding(overrides = {}) {
   assert.equal(resolveTargets(off, "E:/x/other").matchedBy, null);
 }
 
-// 9) 去重键：同会话同原因同键；aborted 的不同 cause 不同键
+// 9) 去重键：同会话同轮同原因同键；**不同轮必须不同键**；aborted 的不同 cause 不同键
 {
+  assert.equal(dedupeKey("s1", { kind: "completed" }, 3), dedupeKey("s1", { kind: "completed" }, 3));
+  assert.notEqual(dedupeKey("s1", { kind: "completed" }, 1), dedupeKey("s1", { kind: "completed" }, 2), "同一会话的不同轮必须各推一次");
+  assert.notEqual(dedupeKey("s1", { kind: "aborted", reason: { kind: "user" } }, 1), dedupeKey("s1", { kind: "aborted", reason: { kind: "parent" } }, 1));
+  assert.notEqual(dedupeKey("s1", { kind: "completed" }, 1), dedupeKey("s2", { kind: "completed" }, 1));
+  // 宿主没给 turn 时退回同一键：宁可少推也不重复推
   assert.equal(dedupeKey("s1", { kind: "completed" }), dedupeKey("s1", { kind: "completed" }));
-  assert.notEqual(dedupeKey("s1", { kind: "aborted", reason: { kind: "user" } }), dedupeKey("s1", { kind: "aborted", reason: { kind: "parent" } }));
-  assert.notEqual(dedupeKey("s1", { kind: "completed" }), dedupeKey("s2", { kind: "completed" }));
 }
 
 // 10) 成功路径：completed 推一条，文案含状态 / 工作区 / 会话
@@ -214,16 +217,17 @@ function binding(overrides = {}) {
   assert.equal(im.calls[0].text, "✅ 任务完成 | task-notify | ziyongchajian" + NL + "工作区: ziyongchajian", "没有标题就不出「会话:」行");
 }
 
-// 11) 失败路径：error 追加原因，且只推一次（去重）
+// 11) 失败路径：error 追加原因；每轮各推一次，只有同一轮重放才去重
 {
   const im = fakeIm();
   const ctx = makeCtx({ dshIm: im.service });
   apply(ctx, binding());
   const reason = { kind: "error", error: { message: "502 bad gateway" } };
   ctx._emit("session/event", session("s1", "E:/x/ziyongchajian"), turnEnd(1, reason));
+  ctx._emit("session/event", session("s1", "E:/x/ziyongchajian"), turnEnd(1, reason));
   ctx._emit("session/event", session("s1", "E:/x/ziyongchajian"), turnEnd(2, reason));
   await settle();
-  assert.equal(im.calls.length, 1, "同一会话同一原因只推一次");
+  assert.equal(im.calls.length, 2, "每轮各推一次；同一轮的事件重放只推一次");
   assert.equal(im.calls[0].text, "❌ 任务失败 | task-notify | ziyongchajian" + NL + "工作区: ziyongchajian" + NL + "原因: 502 bad gateway");
 }
 
