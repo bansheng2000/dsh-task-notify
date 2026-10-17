@@ -565,12 +565,14 @@ function binding(overrides = {}) {
 
 
 /** 调一次桥路由并解析应答；headers 覆盖默认的本机 Host（用伪造 Host/Origin 测守卫）。 */
-async function callBridge(ctx, path, { method = "GET", body, headers } = {}) {
+async function callBridge(ctx, path, { method = "GET", body, headers, bodyError } = {}) {
   const route = ctx._routes.get(path);
   assert.ok(route, "桥路由应已注册: " + path);
   const base = { host: "127.0.0.1:19387", ...(method === "POST" ? { "content-type": "application/json" } : {}) };
   const req = { method, headers: { ...base, ...headers } };
-  if (body !== undefined) {
+  if (bodyError) {
+    req[Symbol.asyncIterator] = async function* () { throw new Error("client gone"); };
+  } else if (body !== undefined) {
     req[Symbol.asyncIterator] = async function* () {
       yield Buffer.from(JSON.stringify(body), "utf8");
     };
@@ -1090,6 +1092,17 @@ const QUESTIONS = [
   await settle();
   assert.equal(im.calls.length, 2, "收下之后同一轮不重复推");
   assert.equal((await readStatus(ctx)).deduped, 1, "这次才算去重命中");
+}
+
+// 58) M2：body 传到一半客户端断开 → 照常回包，不许把异常漏成未处理拒绝
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, ctx._setConfig(binding()));
+  const aborted = await callBridge(ctx, BRIDGE + "/mutate", { method: "POST", bodyError: true });
+  assert.equal(aborted.status, 400, "断开按畸形 body 处理，回包而不是抛穿");
+  assert.equal(aborted.body.code, "settings-rejected");
+  assert.notEqual(aborted.body.code, "bridge-threw", "不许变成 500");
 }
 
 console.log("dsh-task-notify selftest: ok");
