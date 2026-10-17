@@ -310,4 +310,16 @@ try {
   globalThis.fetch = realFetchMutate;
 }
 
+// 4e) L6(i)：收件目标行的 key 按内容生成，删中间一行不会让 React 复用错行
+{
+  // 假 react 的 useState 每次渲染都会取走一个种子，所以这里必须用新加载的实例渲染，不能复用前面渲染过多次的 base。
+  const fresh = loadExports([DESCRIBED, null, null, false, "ziyongchajian=weixin|wx_0123456789abcdef01234567|tgt_1a2b3c4d5e6f7890", null]);
+  const rows = walk(fresh.NotifyCard({})).filter((node) => node.props?.className === "tn-item" || node.props?.className === "tn-item tn-off");
+  assert.equal(rows.length, 2, "两个目标两行");
+  const keys = rows.map((node) => node.props.key);
+  assert.equal(new Set(keys).size, 2, "两行 key 必须不同（用下标做 key 时这里是 0 和 1，仍然不同，见下一条断言）");
+  assert.ok(keys.every((key) => typeof key === "string" && key.startsWith("tgt-")), "key 得是内容键，不是下标：实际 " + JSON.stringify(keys));
+  assert.ok(keys[0].includes("weixin") && keys[0].includes("tgt_1a2b3c4d5e6f7890"), "第一行的 key 带上渠道与 targetId");
+  assert.ok(keys[1].includes("telegram"), "第二行的 key 跟着内容走");
+}
 console.log("dsh-task-notify client selftest: ok");

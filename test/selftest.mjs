@@ -1233,4 +1233,19 @@ assert.equal(await withTimeout(Promise.resolve("done"), 50, "send"), "done", "�
   assert.ok(Array.isArray(status.bots), "bots 仍在");
 }
 
+// 65) L6(iii)：同名不同路径的工作区各记各的，不能并成一个键
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, binding());
+  ctx._emit("session/event", session("sA", "E:/a/dupwork"), turnEnd(1, { kind: "completed" }));
+  ctx._emit("session/event", session("sB", "E:/b/dupwork"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  const res = await readStatus(ctx);
+  const status = res && res.body ? res.body : res;
+  const rows = (status.observed ?? []).filter((item) => item.name === "dupwork");
+  assert.equal(rows.length, 1, "同名工作区在卡片里仍显示一行");
+  assert.equal(rows[0].count, 1, "两个同名不同路径的工作区各算 1 次（按目录名做键会累加成 2）");
+}
+
 console.log("dsh-task-notify selftest: ok");
