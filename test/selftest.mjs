@@ -564,11 +564,11 @@ function binding(overrides = {}) {
 }
 
 
-/** 调一次桥路由并解析应答；remote 非 127.* 时按非回环请求处理。 */
-async function callBridge(ctx, path, { method = "GET", body, remote = "127.0.0.1" } = {}) {
+/** 调一次桥路由并解析应答；headers 覆盖默认的本机 Host（用伪造 Host/Origin 测守卫）。 */
+async function callBridge(ctx, path, { method = "GET", body, headers } = {}) {
   const route = ctx._routes.get(path);
   assert.ok(route, "桥路由应已注册: " + path);
-  const req = { method, socket: { remoteAddress: remote } };
+  const req = { method, headers: { host: "127.0.0.1:19387", ...headers } };
   if (body !== undefined) {
     req[Symbol.asyncIterator] = async function* () {
       yield Buffer.from(JSON.stringify(body), "utf8");
@@ -654,7 +654,7 @@ const BRIDGE = "/api/dsh-task-notify-settings";
   const im = fakeIm();
   const ctx = makeCtx({ dshIm: im.service });
   apply(ctx, ctx._setConfig(binding()));
-  assert.equal((await callBridge(ctx, BRIDGE + "/describe", { remote: "10.0.0.9" })).status, 403);
+  assert.equal((await callBridge(ctx, BRIDGE + "/describe", { headers: { host: "10.0.0.9:19387" } })).status, 403);
   assert.equal((await callBridge(ctx, BRIDGE + "/describe", { method: "POST" })).status, 405);
   const foreign = await callBridge(ctx, BRIDGE + "/mutate", {
     method: "POST",
@@ -712,7 +712,7 @@ async function readStatus(ctx, method = "GET") {
         resolve(method === "GET" && this.statusCode === 200 ? body : { status: this.statusCode, body });
       },
     };
-    route.handler({ method }, res);
+    route.handler({ method, headers: { host: "127.0.0.1:19387" } }, res);
   });
 }
 
@@ -998,6 +998,32 @@ const QUESTIONS = [
   } finally {
     process.env.DSH_STORAGES_DIR = NO_STORAGES;
   }
+}
+
+// 54) H1：桥只认本机来源 —— 隧道域名 Host 与跨站 Origin 一律 403
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, ctx._setConfig(binding()));
+
+  const tunneled = await callBridge(ctx, BRIDGE + "/describe", { headers: { host: "8c0bba4adb190f63.dsh-market.com" } });
+  assert.equal(tunneled.status, 403, "隧道域名转发进来时 Host 不是回环，必须拒");
+  assert.equal(tunneled.body.code, "forbidden");
+
+  const crossSite = await callBridge(ctx, BRIDGE + "/mutate", {
+    method: "POST",
+    body: { ns: "task-notify", ops: [] },
+    headers: { origin: "https://evil.example" },
+  });
+  assert.equal(crossSite.status, 403, "任意网页发起的跨站写必须拒");
+
+  const noHost = await callBridge(ctx, BRIDGE + "/test", { method: "POST", body: {}, headers: { host: undefined } });
+  assert.equal(noHost.status, 403, "没有 Host 头也拒");
+
+  const localhost = await callBridge(ctx, BRIDGE + "/describe", { headers: { host: "localhost:19387", origin: "http://localhost:19387" } });
+  assert.equal(localhost.status, 200, "localhost 前端照常能读");
+  const noOrigin = await callBridge(ctx, BRIDGE + "/describe");
+  assert.equal(noOrigin.status, 200, "无 Origin（同源/桌面壳）照常能读");
 }
 
 console.log("dsh-task-notify selftest: ok");
