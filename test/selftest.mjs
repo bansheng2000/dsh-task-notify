@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const mod = await import("../lib/index.js");
-const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, formatMessage, statusEnabled, storedRules, workspaceAllowed, answerBrief, firstSentence, FIELD_DEFAULTS } = mod;
+const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, formatMessage, statusEnabled, storedRules, workspaceAllowed, answerBrief, firstSentence, FIELD_DEFAULTS, withTimeout, SEND_LIMITS } = mod;
 
 // 「全部工作区」来自宿主 storage 登记表：默认指到一个不存在的目录，免得读到本机
 // 真实工作区把断言变成机器相关（最后一个用例再单独喂真文件）。
@@ -1127,6 +1127,28 @@ const QUESTIONS = [
   await settle();
   assert.equal(im.calls.length, 2, "同一条事件重放（时间戳相同）照样去重");
   assert.equal((await readStatus(ctx)).deduped, 1);
+}
+
+// 60) M5：通道挂起要有超时，别把这一轮永远挂住
+await assert.rejects(withTimeout(new Promise(() => {}), 20, "send"), /timed out/, "withTimeout 超时抛错");
+assert.equal(await withTimeout(Promise.resolve("done"), 50, "send"), "done", "没超时照常返回");
+{
+  const im = fakeIm({ send: () => new Promise(() => {}) });
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, ctx._setConfig(binding()));
+  const before = SEND_LIMITS.sendMs;
+  SEND_LIMITS.sendMs = 30;
+  try {
+    ctx._emit("session/event", session("s1", "E:/x/a"), { type: "turn/end", time: 1000, data: { turn: 1, reason: { kind: "completed" } } });
+    await settle();
+    await new Promise((resolve) => setTimeout(resolve, 80));
+    const status = await readStatus(ctx);
+    assert.equal(status.failed, 1, "发送超时按失败算");
+    assert.equal(status.notified, 0);
+    assert.equal(status.deduped, 0, "没被平台收下就不记账，会话重放还能补推");
+  } finally {
+    SEND_LIMITS.sendMs = before;
+  }
 }
 
 console.log("dsh-task-notify selftest: ok");

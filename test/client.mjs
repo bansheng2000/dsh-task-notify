@@ -155,6 +155,35 @@ assert.ok(saveBtn, "卡片上有「保存工作区规则」按钮");
 saveBtn.props.onClick();
 assert.ok(String(unloaded.__sets[1].args[0]).includes("先点「刷新」"), "没读到配置时点保存要拦下来并提示");
 
+// 4d) M5：桥调用一定带超时信号；超时要给独立错误码而不是「连不上」
+{
+  const savedFetch = globalThis.fetch;
+  const savedAbort = globalThis.AbortSignal;
+  const seen = [];
+  globalThis.AbortSignal = { timeout: (ms) => "SIG:" + ms };
+  globalThis.fetch = async (url, options) => { seen.push({ url, options }); return { status: 200, text: async () => "{\"ok\":true}" }; };
+  try {
+    assert.deepEqual(await base.bridgeCall("/describe", "GET"), { ok: true });
+    assert.equal(seen[0].options.signal, "SIG:20000", "GET 也带 20 秒超时信号");
+    await base.bridgeCall("/test", "POST", { ns: "task-notify" });
+    assert.equal(seen[1].options.signal, "SIG:20000", "POST 同样带超时信号");
+  } finally {
+    globalThis.fetch = savedFetch;
+    globalThis.AbortSignal = savedAbort;
+  }
+}
+{
+  const savedFetch = globalThis.fetch;
+  globalThis.fetch = () => Promise.reject(Object.assign(new Error("timed out"), { name: "TimeoutError" }));
+  try {
+    const timedOut = await base.bridgeCall("/describe", "GET");
+    assert.equal(timedOut.code, "bridge-timeout", "超时要有独立错误码，别和连不上混在一起");
+    assert.ok(timedOut.message.includes("没应答"));
+  } finally {
+    globalThis.fetch = savedFetch;
+  }
+}
+
 // 5) 卡片渲染：开关、状态、收件目标、计数都从 describe 出来的配置来
 const tree = base.NotifyCard({});
 const nodes = walk(tree);
