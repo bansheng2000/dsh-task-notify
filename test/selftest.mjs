@@ -1070,4 +1070,26 @@ const QUESTIONS = [
   assert.equal(typeof local.body.last.at, "string", "时间戳留着，排障要看");
 }
 
+// 57) M1：发送没被接受就不记账 —— 同一轮重放（会话重载）时还能补推
+{
+  const im = fakeIm({ send: (n) => (n === 1 ? { sent: false } : { sent: true }) });
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, ctx._setConfig(binding()));
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  assert.equal(im.calls.length, 1, "第一次照发");
+  assert.equal((await readStatus(ctx)).failed, 1, "被平台拒了记 failed");
+
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  assert.equal(im.calls.length, 2, "上一轮没发成，重放这次要重试（旧代码这里会静默去重）");
+  assert.equal((await readStatus(ctx)).notified, 1, "第二次收下了才记账");
+
+  // 发成了就不再重推
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  assert.equal(im.calls.length, 2, "收下之后同一轮不重复推");
+  assert.equal((await readStatus(ctx)).deduped, 1, "这次才算去重命中");
+}
+
 console.log("dsh-task-notify selftest: ok");
