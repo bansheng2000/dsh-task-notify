@@ -243,6 +243,20 @@ pnpm install
 
 bundle 自带的 `cordis.patch.yml` 用 `- insert:` 创建 loader 条目，**不要**手改成顶层扁平 `- id:`——扁平形态只会改已有条目，条目不存在时静默空操作，插件永不挂载。
 
+### 卸载
+
+**用 DSH 的插件页（推荐）**：设置 → 插件 → 已安装 → 点 `dsh-task-notify` 进详情页 → 右上角垃圾桶图标「卸载」→ 确认。它会把 `dsh-task-notify` 从 profile 的 `package.json`（`dependencies` 与 `dsh.profile.bundles` 两处）摘掉并重跑一次安装，结果是 `applied` 或 `restart-required`（后者重启 DSH 生效）。DSH 目前不做自动升级：换新版也是先卸载再装。
+
+卸载按钮灰的只可能是这两种（`readOnlyReason`）：`management-required` = 宿主不管理这个 profile（DSH 自带的包）；`unaddressable` = 宿主条目对不上号（包内 `cordis.patch.yml` 写成扁平的 `- id:` 而不是 `- insert:`）。正常从 profile 装的 `dsh-task-notify` 不属于这两种，按钮是亮的。
+
+**手工等价步骤**（`<profile>` 指 `~/.dsh/profiles/desktop`）：
+
+1. 从 `<profile>/package.json` 的 `dsh.profile.bundles` 里删掉 `"dsh-task-notify"`，再从 `dependencies` 里删掉这一行（本机是 `"dsh-task-notify",`）。
+2. 在 `<profile>` 目录里跑一次 `pnpm install`（本机没装 node，用上文那条 Electron-as-Node 的命令）。
+3. 重启 DSH。宿主条目来自包内的 `cordis.patch.yml`，随 bundles 列表一起消失，不用手工清 `cordis.patch.yml` 覆盖层。
+
+卸载只是不加载，通知历史（`~/.dsh/integrations/dsh-weixin` 等）与工作区登记表都不动；要恢复就按上面的安装步骤再装一次。
+
 ## 更新
 
 ```powershell
