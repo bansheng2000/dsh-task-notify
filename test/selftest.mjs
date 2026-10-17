@@ -1192,12 +1192,14 @@ assert.equal(await withTimeout(Promise.resolve("done"), 50, "send"), "done", "�
 {
   const dir = mkdtempSync(join(tmpdir(), "tn-ws-"));
   const file = join(dir, "workspace.json");
+  let stamp = 1_700_000_000_000;
   const write = (paths) => {
     const workspaces = {};
     paths.forEach((path, index) => { workspaces["u" + index] = { path, title: "T", sessionIds: ["s" + index] }; });
     writeFileSync(file, JSON.stringify({ tables: { workspaces } }), "utf8");
-    // mtime 精度兜底：两次写入挤在同一毫秒时也要能测出缓存失效。
-    utimesSync(file, new Date(), new Date(Date.now() + 1000));
+    // mtime 必须每次不同且可预期：真实写入很容易挤在同一毫秒，靠 Date.now() 会偶发假绿。
+    utimesSync(file, new Date(stamp), new Date(stamp));
+    stamp += 60_000;
   };
   write(["E:/x/alpha"]);
   process.env.DSH_STORAGES_DIR = dir;
