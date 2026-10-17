@@ -1151,4 +1151,28 @@ assert.equal(await withTimeout(Promise.resolve("done"), 50, "send"), "done", "�
   }
 }
 
+// 61) M6：展示路径(storedRules)与投递路径(rulesOf)的骨架必须同源，只有 targets/workspaces 的策略不同
+{
+  const rules = {
+    enabled: true,
+    format: "markdown",
+    skipSubagents: false,
+    notifyQuestions: false,
+    statuses: { aborted: false },
+    onlyWorkspaces: ["a", "", 3],
+    fields: { time: true },
+  };
+  const shown = storedRules({ rules });
+  const sent = rulesOf({ rules });
+  for (const key of ["enabled", "format", "skipSubagents", "notifyQuestions", "statuses", "onlyWorkspaces", "fields"]) {
+    assert.deepEqual(shown[key], sent[key], "骨架键 " + key + " 两条路径必须一致（改了骨架只改一边就会红）");
+  }
+  assert.equal(shown.format, "markdown");
+  assert.equal(shown.statuses.aborted, false);
+  assert.equal(sent.statuses.aborted, false);
+  assert.equal(shown.fields.time, true);
+  assert.equal(shown.fields.sessionId, false, "fields 缺省值仍在（来自 schema）");
+  assert.equal(sent.statuses.completed, true, "statuses 缺省值仍在（来自 schema）");
+}
+
 console.log("dsh-task-notify selftest: ok");
