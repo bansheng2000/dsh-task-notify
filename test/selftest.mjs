@@ -568,7 +568,8 @@ function binding(overrides = {}) {
 async function callBridge(ctx, path, { method = "GET", body, headers } = {}) {
   const route = ctx._routes.get(path);
   assert.ok(route, "桥路由应已注册: " + path);
-  const req = { method, headers: { host: "127.0.0.1:19387", ...headers } };
+  const base = { host: "127.0.0.1:19387", ...(method === "POST" ? { "content-type": "application/json" } : {}) };
+  const req = { method, headers: { ...base, ...headers } };
   if (body !== undefined) {
     req[Symbol.asyncIterator] = async function* () {
       yield Buffer.from(JSON.stringify(body), "utf8");
@@ -1024,6 +1025,27 @@ const QUESTIONS = [
   assert.equal(localhost.status, 200, "localhost 前端照常能读");
   const noOrigin = await callBridge(ctx, BRIDGE + "/describe");
   assert.equal(noOrigin.status, 200, "无 Origin（同源/桌面壳）照常能读");
+}
+
+// 55) H2：POST 只吃 application/json —— text/plain 这种免预检的跨站写要被 415 挡掉
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, ctx._setConfig(binding()));
+
+  const plain = await callBridge(ctx, BRIDGE + "/mutate", {
+    method: "POST",
+    body: { ns: "task-notify", ops: [] },
+    headers: { "content-type": "text/plain" },
+  });
+  assert.equal(plain.status, 415, "text/plain 是 CORS 安全列类型，必须按类型拒");
+  assert.equal(plain.body.code, "unsupported-media-type");
+
+  const absent = await callBridge(ctx, BRIDGE + "/test", { method: "POST", body: {}, headers: { "content-type": undefined } });
+  assert.equal(absent.status, 415, "没有 content-type 也拒");
+
+  const json = await callBridge(ctx, BRIDGE + "/mutate", { method: "POST", body: { ns: "task-notify", ops: [] } });
+  assert.equal(json.status, 200, "application/json 照常");
 }
 
 console.log("dsh-task-notify selftest: ok");
