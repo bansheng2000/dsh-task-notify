@@ -1048,4 +1048,26 @@ const QUESTIONS = [
   assert.equal(json.status, 200, "application/json 照常");
 }
 
+// 56) H3：状态面同样只认本机来源，且不再回吐磁盘路径与会话 id
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, ctx._setConfig(binding()));
+  ctx._emit("session/event", session("s1", "E:/x/beta"), turnEnd(1, { kind: "completed" }));
+  await settle();
+
+  const tunneled = await callBridge(ctx, "/_task-notify/status", { headers: { host: "8c0bba4adb190f63.dsh-market.com" } });
+  assert.equal(tunneled.status, 403, "状态面也要挡隧道域名");
+
+  const local = await callBridge(ctx, "/_task-notify/status");
+  assert.equal(local.status, 200);
+  assert.equal(local.body.observed[0].name, "beta", "计数与目录名照给");
+  assert.equal(local.body.observed[0].count, 1);
+  assert.ok(!("cwd" in local.body.observed[0]), "不回吐完整磁盘路径");
+  assert.ok(!JSON.stringify(local.body).includes("E:/x/beta"), "路径不得出现在响应任何角落");
+  assert.ok(!JSON.stringify(local.body).includes("s1"), "session id 不得出现在响应里");
+  assert.equal(local.body.last.sessionId, undefined, "last 里也不带 sessionId");
+  assert.equal(typeof local.body.last.at, "string", "时间戳留着，排障要看");
+}
+
 console.log("dsh-task-notify selftest: ok");
