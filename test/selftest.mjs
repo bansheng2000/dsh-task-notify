@@ -1,13 +1,13 @@
 // dsh-task-notify 的自检：不进 DSH 宿主，用假 ctx / 假 dshIm 验证判定、文案、去重、多渠道扇出、未绑定分支。
 // 跑法：node test/selftest.mjs
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const mod = await import("../lib/index.js");
-const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, formatMessage, statusEnabled, storedRules, workspaceAllowed, answerBrief, firstSentence, FIELD_DEFAULTS, withTimeout, SEND_LIMITS, localIso } = mod;
+const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, formatMessage, statusEnabled, storedRules, workspaceAllowed, answerBrief, firstSentence, FIELD_DEFAULTS, withTimeout, SEND_LIMITS, localIso, storedWorkspaces } = mod;
 
 // 「全部工作区」来自宿主 storage 登记表：默认指到一个不存在的目录，免得读到本机
 // 真实工作区把断言变成机器相关（最后一个用例再单独喂真文件）。
@@ -1186,6 +1186,26 @@ assert.equal(await withTimeout(Promise.resolve("done"), 50, "send"), "done", "�
   const line = text.split(String.fromCharCode(10)).find((row) => row.startsWith("时间: "));
   assert.ok(line !== undefined && /[+-]\d{2}:\d{2}$/.test(line), "通知里的时间要带本地偏移");
   assert.ok(!/Z$/.test(line), "通知里的时间不能是 UTC 的 Z 结尾");
+}
+
+// 63) 工作区登记表按 mtime 缓存：没变不重读、变了立刻反映（L4）。
+{
+  const dir = mkdtempSync(join(tmpdir(), "tn-ws-"));
+  const file = join(dir, "workspace.json");
+  const write = (paths) => {
+    const workspaces = {};
+    paths.forEach((path, index) => { workspaces["u" + index] = { path, title: "T", sessionIds: ["s" + index] }; });
+    writeFileSync(file, JSON.stringify({ tables: { workspaces } }), "utf8");
+    // mtime 精度兜底：两次写入挤在同一毫秒时也要能测出缓存失效。
+    utimesSync(file, new Date(), new Date(Date.now() + 1000));
+  };
+  write(["E:/x/alpha"]);
+  process.env.DSH_STORAGES_DIR = dir;
+  assert.deepEqual(storedWorkspaces().map((item) => item.name), ["alpha"], "第一次读到 1 个工作区");
+  assert.deepEqual(storedWorkspaces().map((item) => item.name), ["alpha"], "文件没变时复用缓存、结果一致");
+  write(["E:/x/beta"]);
+  assert.deepEqual(storedWorkspaces().map((item) => item.name), ["beta"], "文件变了要立刻反映，不能吃旧缓存");
+  process.env.DSH_STORAGES_DIR = NO_STORAGES;
 }
 
 console.log("dsh-task-notify selftest: ok");
