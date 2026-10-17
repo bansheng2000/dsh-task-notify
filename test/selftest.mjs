@@ -201,6 +201,11 @@ function binding(overrides = {}) {
   assert.notEqual(dedupeKey("s1", { kind: "completed" }, 1), dedupeKey("s2", { kind: "completed" }, 1));
   // 宿主没给 turn 时退回同一键：宁可少推也不重复推
   assert.equal(dedupeKey("s1", { kind: "completed" }), dedupeKey("s1", { kind: "completed" }));
+  assert.notEqual(
+    dedupeKey("s1", { kind: "completed" }, undefined, 1000),
+    dedupeKey("s1", { kind: "completed" }, undefined, 2000),
+    "turn 缺失时按事件时间戳区分，不能退回常量把整个会话并成一个键",
+  );
 }
 
 // 10) 成功路径：completed 推一条，文案含状态 / 工作区 / 会话
@@ -1103,6 +1108,25 @@ const QUESTIONS = [
   assert.equal(aborted.status, 400, "断开按畸形 body 处理，回包而不是抛穿");
   assert.equal(aborted.body.code, "settings-rejected");
   assert.notEqual(aborted.body.code, "bridge-threw", "不许变成 500");
+}
+
+// 59) M3：上游不给 turn 时也不许退化成「一个会话只推一条」
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, ctx._setConfig(binding()));
+  const noTurn = (time) => ({ type: "turn/end", time, data: { reason: { kind: "completed" } } });
+
+  ctx._emit("session/event", session("s1", "E:/x/a"), noTurn(1000));
+  await settle();
+  ctx._emit("session/event", session("s1", "E:/x/a"), noTurn(2000));
+  await settle();
+  assert.equal(im.calls.length, 2, "两轮（时间戳不同）各推一次");
+
+  ctx._emit("session/event", session("s1", "E:/x/a"), noTurn(1000));
+  await settle();
+  assert.equal(im.calls.length, 2, "同一条事件重放（时间戳相同）照样去重");
+  assert.equal((await readStatus(ctx)).deduped, 1);
 }
 
 console.log("dsh-task-notify selftest: ok");
