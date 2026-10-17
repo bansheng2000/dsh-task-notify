@@ -117,6 +117,44 @@ assert.deepEqual(base.parseWorkspaces("  alpha = weixin | wx_1 | tgt_2 " + NL + 
 assert.equal(base.formatWorkspaces(DESCRIBED.config.workspaces), "ziyongchajian=weixin|wx_0123456789abcdef01234567|tgt_1a2b3c4d5e6f7890");
 assert.equal(base.formatWorkspaces(null), "");
 
+// 4b) M4：显示取第一条启用的；保存按行合并，不抹掉同工作区的第 2..N 条与 enabled:false
+assert.equal(
+  base.formatWorkspaces({ alpha: [
+    { channel: "weixin", botId: "wx_1", targetId: "tgt_1", enabled: false },
+    { channel: "weixin", botId: "wx_2", targetId: "tgt_2", enabled: true },
+  ] }),
+  "alpha=weixin|wx_2|tgt_2",
+  "显示第一条启用的目标（停用的那条仍在配置里）",
+);
+const twoTargets = { alpha: [
+  { channel: "weixin", botId: "wx_1", targetId: "tgt_1", enabled: true },
+  { channel: "weixin", botId: "wx_2", targetId: "tgt_2", enabled: false },
+] };
+assert.deepEqual(
+  base.mergeWorkspaces(twoTargets, base.parseWorkspaces("alpha=weixin|wx_1|tgt_1")),
+  twoTargets,
+  "行没改过：原数组整条保留（第 2 条与 enabled:false 都还在）",
+);
+assert.deepEqual(
+  base.mergeWorkspaces(twoTargets, base.parseWorkspaces("alpha=weixin|wx_9|tgt_9" + NL + "beta=weixin|wx_1|tgt_1")),
+  {
+    alpha: [{ channel: "weixin", botId: "wx_9", targetId: "tgt_9" }],
+    beta: [{ channel: "weixin", botId: "wx_1", targetId: "tgt_1" }],
+  },
+  "改过的行按文本写一条、新行照写、文本里没有的工作区=删掉",
+);
+assert.deepEqual(base.mergeWorkspaces(null, base.parseWorkspaces("alpha=weixin|wx_1|tgt_1")), {
+  alpha: [{ channel: "weixin", botId: "wx_1", targetId: "tgt_1" }],
+}, "没有基线配置时按文本写");
+
+// 4c) M4：wsText 还没填上（describe 没回来）时点保存只报错，不发清空请求
+const unloaded = loadExports([DESCRIBED, null, null, false, null, null]);
+const unloadedTree = unloaded.NotifyCard({});
+const saveBtn = walk(unloadedTree).find((node) => node.type === "button" && node.props?.children === "保存工作区规则");
+assert.ok(saveBtn, "卡片上有「保存工作区规则」按钮");
+saveBtn.props.onClick();
+assert.ok(String(unloaded.__sets[1].args[0]).includes("先点「刷新」"), "没读到配置时点保存要拦下来并提示");
+
 // 5) 卡片渲染：开关、状态、收件目标、计数都从 describe 出来的配置来
 const tree = base.NotifyCard({});
 const nodes = walk(tree);
