@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const mod = await import("../lib/index.js");
-const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, formatMessage, statusEnabled, storedRules, workspaceAllowed, answerBrief, firstSentence, FIELD_DEFAULTS, withTimeout, SEND_LIMITS } = mod;
+const { apply, rulesOf, resolveConfig, resolveTargets, targetsOf, dedupeKey, reasonPhrase, workspaceName, sessionTitle, formatMessage, statusEnabled, storedRules, workspaceAllowed, answerBrief, firstSentence, FIELD_DEFAULTS, withTimeout, SEND_LIMITS, localIso } = mod;
 
 // 「全部工作区」来自宿主 storage 登记表：默认指到一个不存在的目录，免得读到本机
 // 真实工作区把断言变成机器相关（最后一个用例再单独喂真文件）。
@@ -1173,6 +1173,19 @@ assert.equal(await withTimeout(Promise.resolve("done"), 50, "send"), "done", "�
   assert.equal(shown.fields.time, true);
   assert.equal(shown.fields.sessionId, false, "fields 缺省值仍在（来自 schema）");
   assert.equal(sent.statuses.completed, true, "statuses 缺省值仍在（来自 schema）");
+}
+
+// 62) 时间戳用本地钟点 + 时区偏移，不再是 UTC 的 Z（L2）。
+{
+  const date = new Date(2026, 9, 17, 13, 38, 59); // 本地钟点
+  const stamp = localIso(date);
+  assert.match(stamp, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}[+-]\d{2}:\d{2}$/, "时间戳要带时区偏移");
+  assert.equal(stamp.slice(11, 19), "13:38:59", "时间戳要用本地钟点");
+  assert.equal(Date.parse(stamp), date.getTime(), "带偏移的时间戳要能解析回同一时刻");
+  const text = formatMessage({ label: "✅ 任务完成", title: "T", cwd: "E:/x/alpha", phrase: "", question: null, sessionId: "s1", at: undefined, brief: "", fields: { ...FIELD_DEFAULTS, time: true } });
+  const line = text.split(String.fromCharCode(10)).find((row) => row.startsWith("时间: "));
+  assert.ok(line !== undefined && /[+-]\d{2}:\d{2}$/.test(line), "通知里的时间要带本地偏移");
+  assert.ok(!/Z$/.test(line), "通知里的时间不能是 UTC 的 Z 结尾");
 }
 
 console.log("dsh-task-notify selftest: ok");
