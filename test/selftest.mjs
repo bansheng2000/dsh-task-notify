@@ -570,13 +570,17 @@ function binding(overrides = {}) {
 
 
 /** 调一次桥路由并解析应答；headers 覆盖默认的本机 Host（用伪造 Host/Origin 测守卫）。 */
-async function callBridge(ctx, path, { method = "GET", body, headers, bodyError } = {}) {
+async function callBridge(ctx, path, { method = "GET", body, rawBody, headers, bodyError } = {}) {
   const route = ctx._routes.get(path);
   assert.ok(route, "桥路由应已注册: " + path);
   const base = { host: "127.0.0.1:19387", ...(method === "POST" ? { "content-type": "application/json" } : {}) };
   const req = { method, headers: { ...base, ...headers } };
   if (bodyError) {
     req[Symbol.asyncIterator] = async function* () { throw new Error("client gone"); };
+  } else if (rawBody !== undefined) {
+    req[Symbol.asyncIterator] = async function* () {
+      yield Buffer.from(rawBody, "utf8");
+    };
   } else if (body !== undefined) {
     req[Symbol.asyncIterator] = async function* () {
       yield Buffer.from(JSON.stringify(body), "utf8");
@@ -585,11 +589,13 @@ async function callBridge(ctx, path, { method = "GET", body, headers, bodyError 
   return new Promise((resolve) => {
     const res = {
       statusCode: 0,
-      writeHead(status) {
+      headers: {},
+      writeHead(status, headers) {
         this.statusCode = status;
+        this.headers = headers ?? {};
       },
       end(text) {
-        resolve({ status: this.statusCode, body: JSON.parse(text) });
+        resolve({ status: this.statusCode, headers: this.headers, body: JSON.parse(text) });
       },
     };
     // end() 里 resolve；handler 是 async，不能在 executor 里 await。
@@ -1208,6 +1214,23 @@ assert.equal(await withTimeout(Promise.resolve("done"), 50, "send"), "done", "�
   write(["E:/x/beta"]);
   assert.deepEqual(storedWorkspaces().map((item) => item.name), ["beta"], "文件变了要立刻反映，不能吃旧缓存");
   process.env.DSH_STORAGES_DIR = NO_STORAGES;
+}
+
+// 64) 桥的排查体验：body 超限回 413、畸形 JSON 回 400，配置类响应带 no-store（L5）。
+{
+  const ctx = makeCtx({ dshIm: fakeIm().service });
+  apply(ctx, ctx._setConfig(binding()));
+  const big = await callBridge(ctx, BRIDGE + "/test", { method: "POST", body: { pad: "x".repeat(300 * 1024) } });
+  assert.equal(big.status, 413, "超过 256KB 要回 413");
+  assert.equal(big.body.code, "body-too-large", "超限的 code 要跟畸形 JSON 分开");
+  const broken = await callBridge(ctx, BRIDGE + "/mutate", { method: "POST", rawBody: "{oops" });
+  assert.equal(broken.status, 400);
+  assert.equal(broken.body.code, "settings-rejected");
+  const ok = await callBridge(ctx, BRIDGE + "/describe");
+  assert.equal(ok.headers["cache-control"], "no-store", "配置类响应不许被缓存");
+  const status = await readStatus(ctx);
+  assert.ok(!Object.prototype.hasOwnProperty.call(status, "accounts"), "status 不再重复吐一份 accounts（文档字段只有 bots）");
+  assert.ok(Array.isArray(status.bots), "bots 仍在");
 }
 
 console.log("dsh-task-notify selftest: ok");
