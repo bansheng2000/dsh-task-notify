@@ -15,6 +15,8 @@ const DESCRIBED = {
     format: "plain",
     skipSubagents: true,
     notifyQuestions: true,
+    skipWhenWatching: true,
+    afkAfterMs: 120000,
     statuses: { completed: true, error: true, aborted: false, blocked: true, "max-tokens": true, interrupted: true, forked: false },
     targets: [
       { enabled: true, channel: "weixin", botId: "wx_0123456789abcdef01234567", targetId: "tgt_1a2b3c4d5e6f7890" },
@@ -188,7 +190,7 @@ assert.ok(String(unloaded.__sets[1].args[0]).includes("先点「刷新」"), "�
 const tree = base.NotifyCard({});
 const nodes = walk(tree);
 const boxes = nodes.filter((node) => node.type === "input" && node.props?.type === "checkbox");
-assert.equal(boxes.length, 1 + 7 + 2 + 2 + 6 + 2, "总开关 + 七个状态 + 跳过子代理 + 待答问题 + 每个收件目标一个启用勾 + 六个正文字段 + 两个见过的工作区");
+assert.equal(boxes.length, 1 + 7 + 3 + 2 + 6 + 2, "总开关 + 七个状态 + 跳过子代理 + 待答问题 + 我在看就不推 + 每个收件目标一个启用勾 + 六个正文字段 + 两个见过的工作区");
 assert.equal(boxes[0].props.checked, true, "总开关跟着 enabled");
 assert.deepEqual(
   boxes.slice(1, 8).map((node) => node.props.checked),
@@ -206,6 +208,8 @@ const spans = nodes.filter((node) => node.type === "span").map((node) => node.pr
 assert.ok(spans.includes("启用通知"));
 assert.ok(spans.includes("跳过子代理"));
 assert.ok(spans.includes("会话要你选择时也提示"));
+assert.ok(spans.includes("我在看这个会话时不推"));
+assert.ok(spans.includes("秒算离开"), "afkAfterMs 有秒数输入框");
 const flat = JSON.stringify(tree);
 assert.ok(flat.includes("tgt_1a2b3c4d5e6f7890"), "已填的 targetId 显示在输入框里");
 assert.ok(flat.includes("ziyongchajian=weixin"), "工作区规则回填到 textarea");
@@ -273,9 +277,9 @@ try {
 }
 
 // 10) 正文可配（「通知里包含」）+ 工作区可勾（「通知哪些工作区」）：勾一下就要写回配置
-const fieldBoxes = boxes.slice(10, 16);
+const fieldBoxes = boxes.slice(11, 17);
 assert.deepEqual(fieldBoxes.map((node) => node.props.checked), [true, true, true, true, false, false], "字段缺省：标题/工作区/原因/答复首句勾上，会话 id 与时间不勾");
-const wsBoxes = boxes.slice(16, 18);
+const wsBoxes = boxes.slice(17, 19);
 assert.deepEqual(wsBoxes.map((node) => node.props.checked), [true, false], "工作区勾选跟着 onlyWorkspaces（只勾了 alpha）");
 
 let posted = null;

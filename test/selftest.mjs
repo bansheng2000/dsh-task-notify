@@ -1288,4 +1288,68 @@ assert.equal(await withTimeout(Promise.resolve("done"), 50, "send"), "done", "�
   assert.equal(im.calls.length, 1, "completed 立即推，不等");
 }
 
+// 69) 会话正显示在屏幕上且人在动 → 不推
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, binding({}));
+  const res = await callBridge(ctx, BRIDGE + "/presence", { method: "POST", body: { sessionId: "s1", visible: true, lastInputAt: Date.now() } });
+  assert.equal(res.body.ok, true, "presence 上报成功");
+  assert.equal(res.body.value.watching, true, "刚报完即算在看");
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  assert.equal(im.calls.length, 0, "正在看 → 不推");
+  const status = await readStatus(ctx);
+  assert.equal(status.skippedWatching, 1, "计入 skippedWatching");
+  assert.equal(status.seen, 1, "仍然计入 seen");
+}
+
+// 70) 上报还在、但很久没输入（人走了）→ 照常推
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, binding({ afkAfterMs: 60000 }));
+  await callBridge(ctx, BRIDGE + "/presence", { method: "POST", body: { sessionId: "s1", visible: true, lastInputAt: Date.now() - 10 * 60 * 1000 } });
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  assert.equal(im.calls.length, 1, "人不在 → 照常推");
+}
+
+// 71) 在看的是别的会话 → 这个会话照常推
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, binding({}));
+  await callBridge(ctx, BRIDGE + "/presence", { method: "POST", body: { sessionId: "other", visible: true, lastInputAt: Date.now() } });
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  assert.equal(im.calls.length, 1, "看的是别人 → 照常推");
+}
+
+// 72) 标签页切走（visible:false）→ 立刻恢复推送
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, binding({}));
+  await callBridge(ctx, BRIDGE + "/presence", { method: "POST", body: { sessionId: "s1", visible: true, lastInputAt: Date.now() } });
+  await callBridge(ctx, BRIDGE + "/presence", { method: "POST", body: { sessionId: "s1", visible: false, lastInputAt: Date.now() } });
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  assert.equal(im.calls.length, 1, "页面不可见 → 照常推");
+}
+
+// 73) 关掉 skipWhenWatching → 在看也推；上报缺 sessionId 被拒
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, binding({ skipWhenWatching: false }));
+  const rejected = await callBridge(ctx, BRIDGE + "/presence", { method: "POST", body: { visible: true } });
+  assert.equal(rejected.body.ok, false, "缺 sessionId 被拒");
+  assert.equal(rejected.status, 200, "拒绝也走 200 + ok:false");
+  await callBridge(ctx, BRIDGE + "/presence", { method: "POST", body: { sessionId: "s1", visible: true, lastInputAt: Date.now() } });
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  assert.equal(im.calls.length, 1, "开关关掉 → 在看也推");
+}
+
 console.log("dsh-task-notify selftest: ok");

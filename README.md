@@ -11,6 +11,7 @@
 - **去重**：按轮——同一 `sessionId` + 同一 `turn` + 同一结束原因只推一次（只吞同一轮的事件重放；整批算一次，不是每个目标一次）。**同一会话的每一轮都会各推一条。**
 - **待答问题也提示**：会话调 `ask_user_question` 要你做选择时推一条 ❓ 通知（只旁听不抢答，回答权原样交回 Web / dsh-im），单独用 `notifyQuestions` 开关控制。
 - **中断 / 失败先等一会**：`error` / `interrupted` / `max-tokens` 三种结束原因默认先等 `autoContinueGraceMs`（60 秒）再判定——期间会话被 **dsh-auto-continue** 续跑接上了就**不推**（计入 `suppressed`），没续上才补推。装了自动继续插件的机器上，不会再出现「中断了」紧接着「续上了」的连环噪音。
+- **我在看这个会话就不推**：`skipWhenWatching`（缺省开）+ `afkAfterMs`（缺省 120 秒）。Web 页面正停在这个会话上、且最近 2 分钟有鼠标/键盘操作时，这一轮结束**不推**（计入 `skippedWatching`）；切到别的标签页、或人离开超过 `afkAfterMs` 就照常推。拿不到这个信号（CLI / headless / 没开 Web GUI）时一律照常推——只会多推，不会漏推。
 - **哪些工作区发**：`onlyWorkspaces`（或卡片上勾工作区）为空 = 全部工作区都发；非空则先按工作区拦一道，被拦下的算 `filteredWorkspace`，不算失败。卡片里的勾选列表**读宿主登记的全部工作区**（`~/.dsh/storages/workspace.json`），不是只列跑过的。
 - **正文可裁剪**：`fields` 决定正文带「会话标题 / 工作区 / 原因 / 答复首句 / 会话 / 时间」哪几项，全关也仍有一条首行（谁、什么状态）。
 - **顺带一句结论**：`fields.brief`（缺省开）把本轮最后一条回复的首句摘进正文「内容:」那行——插件在本地读会话事件流，**不调模型、不花 token**。
@@ -86,6 +87,9 @@ config:
     # 异常结束（error / interrupted / max-tokens）先等这么久再判定：
     # 期间被 dsh-auto-continue 续跑接上就不推（计入 suppressed）。0 = 立即推。
     autoContinueGraceMs: 60000
+    # 你正在看这个会话（页面停在它上面 + 最近有输入）就不推；多久没输入算离开。
+    skipWhenWatching: true
+    afkAfterMs: 120000
 
     # 每种结束原因一个开关，全开。关掉哪种就不再推哪种，
     # 被拦下的轮次计入 /_task-notify/status 的 filtered。
@@ -165,7 +169,8 @@ config:
   - 该账户在 dsh-im 里一条收件目标都没有时，按钮下面会给出「去 集成 → 该机器人 → 投递设置 → 从已聊过的会话选择」的下一步，而不是把下拉藏起来。
 - 按工作区换收件目标（每行一条 `名称=channel|botId|targetId`，与「通知哪些工作区」是两件事：这里决定发给谁，那里决定发不发）；
 - 「刷新」重新读配置、「发测试通知」真发一条（不受状态开关影响，用来验证通道与账户是不是通的）；
-- 底部计数：已推送 / 未绑定跳过 / 状态过滤 / 工作区过滤 / 被续跑吞掉 / 去重 / 失败。
+- 「我在看这个会话时不推」勾 +「无操作 N 秒算离开」数字框：判定窗口直接在卡片上改；
+- 底部计数：已推送 / 未绑定跳过 / 状态过滤 / 工作区过滤 / 被续跑吞掉 / 被看着跳过 / 去重 / 失败。
 
 卡片顶部如果写着「dsh-im 当前没有在线账户」，说明 `ctx.dshIm` 没就绪或还没配任何通道——通知会全部跳过，不会静默丢。
 
@@ -297,7 +302,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 ```json
 {
   "ok": true, "active": true, "format": "plain", "skipSubagents": true,
-  "notifyQuestions": true,
+  "notifyQuestions": true, "skipWhenWatching": true, "afkAfterMs": 120000,
   "statuses": { "completed": true, "error": true, "aborted": true, "blocked": true,
                 "max-tokens": true, "interrupted": true, "forked": true },
   "targets": [{ "channel": "weixin", "botId": "wx_...", "targetId": "tgt_...", "enabled": true }],
@@ -309,7 +314,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
   "channels": [{ "channel": "weixin", "accounts": 1, "botIds": ["wx_..."] }],
   "dshImInstalled": true,
   "seen": 12, "notified": 6, "failed": 0, "skippedUnbound": 3, "deduped": 1, "filtered": 0, "filteredWorkspace": 0,
-  "suppressed": 1,
+  "suppressed": 1, "skippedWatching": 0, "presence": 0,
   "questions": 2,
   "last": { "sessionId": "...", "turn": 3, "reason": "completed", "at": "..." }
 }
@@ -328,6 +333,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 | 微信 notified 但没收到 | `{sent:true}` 只代表平台接口接受，不代表送达。微信主动投递还需要用户消息里携带过的 `context_token`；先给机器人发一条微信消息再触发。 |
 | 某个通道 / 账户不想收了 | 把那条目标 `enabled: false`（不用删配置）；全停用等于该工作区未绑定，`skippedUnbound` 会涨、日志写 `no enabled target bound`。 |
 | 会话要你选择时没收到通知 | `notifyQuestions` 被关了；subagent 默认也不推（`skipSubagents`）。看 `questions` 计数涨没涨——涨了说明事件到了，是没绑目标或账户不在线。 |
+| 我明明在看这个会话，它还推了 | 判定要求三条同时成立：页面可见、上报还新鲜、最近 `afkAfterMs` 内有鼠标/键盘操作。只看不动的画面超过 2 分钟就会被当作人不在（这是刻意的，宁可多推）；`skipWhenWatching` 关掉、或 `afkAfterMs` 调小都会让它更容易推。`presence` 为 0 说明客户端根本没上报（CLI / 没开 Web GUI / 老宿主没有 `sidebarRight.mounted`）。 |
 | 通知太吵 | `skipSubagents: true` 过滤 subagent；`statuses` 里关掉不关心的类型（如 `forked: false`、`blocked: false`）；`onlyWorkspaces` 只留常驻工作区。多轮就是一条一轮地推（有意为之，方便「每轮干完都知道」），要彻底静音就把目标 `enabled: false`。 |
 | `filtered` 涨但一条没收到 | `statuses` 把这种结束原因关了（`filtered` 数被开关拦下的轮次）。看 `statuses` 哪项是 `false`。 |
 | 任务中断了却没收到通知 | 多半是自动继续插件接手了：`error` / `interrupted` / `max-tokens` 会先等 `autoContinueGraceMs`，期间被 dsh-auto-continue 续跑接上就不推（`suppressed` 涨 1）。想无论如何都收到，把 `autoContinueGraceMs` 设为 `0`。 |

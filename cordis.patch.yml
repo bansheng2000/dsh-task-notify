@@ -9,6 +9,11 @@
           # 异常结束（error / interrupted / max-tokens）先等这么多毫秒再判定：
           # 期间被 dsh-auto-continue 续跑接上就不推（计入 suppressed）。0 = 立即推。
           autoContinueGraceMs: 60000
+          # 你正在看这个会话（Web 页面停在它上面 + 最近有鼠标/键盘活动）就不推。
+          # 没有客户端上报时照常推：CLI / headless / 没开 Web GUI 都不会因此漏通知。
+          skipWhenWatching: true
+          # 多久没有鼠标/键盘输入算「人不在」（毫秒），超过就照常推。
+          afkAfterMs: 120000
           # 每种结束原因一个开关（全开）。关掉哪种就不再推哪种；
           # 被开关拦下的轮次计到 /_task-notify/status 的 filtered。
           statuses:
