@@ -10,6 +10,7 @@
 - **未绑定 / 账户未连接**：跳过 + 记日志 + 计数，不报错打断监听。
 - **去重**：按轮——同一 `sessionId` + 同一 `turn` + 同一结束原因只推一次（只吞同一轮的事件重放；整批算一次，不是每个目标一次）。**同一会话的每一轮都会各推一条。**
 - **待答问题也提示**：会话调 `ask_user_question` 要你做选择时推一条 ❓ 通知（只旁听不抢答，回答权原样交回 Web / dsh-im），单独用 `notifyQuestions` 开关控制。
+- **中断 / 失败先等一会**：`error` / `interrupted` / `max-tokens` 三种结束原因默认先等 `autoContinueGraceMs`（60 秒）再判定——期间会话被 **dsh-auto-continue** 续跑接上了就**不推**（计入 `suppressed`），没续上才补推。装了自动继续插件的机器上，不会再出现「中断了」紧接着「续上了」的连环噪音。
 - **哪些工作区发**：`onlyWorkspaces`（或卡片上勾工作区）为空 = 全部工作区都发；非空则先按工作区拦一道，被拦下的算 `filteredWorkspace`，不算失败。卡片里的勾选列表**读宿主登记的全部工作区**（`~/.dsh/storages/workspace.json`），不是只列跑过的。
 - **正文可裁剪**：`fields` 决定正文带「会话标题 / 工作区 / 原因 / 答复首句 / 会话 / 时间」哪几项，全关也仍有一条首行（谁、什么状态）。
 - **顺带一句结论**：`fields.brief`（缺省开）把本轮最后一条回复的首句摘进正文「内容:」那行——插件在本地读会话事件流，**不调模型、不花 token**。
@@ -82,6 +83,9 @@ config:
     format: plain          # plain | markdown，所有目标共用
     skipSubagents: true    # 只报顶层任务，subagent 的轮次结束不推
     notifyQuestions: true  # 会话要你做选择时（ask_user_question）也推一条
+    # 异常结束（error / interrupted / max-tokens）先等这么久再判定：
+    # 期间被 dsh-auto-continue 续跑接上就不推（计入 suppressed）。0 = 立即推。
+    autoContinueGraceMs: 60000
 
     # 每种结束原因一个开关，全开。关掉哪种就不再推哪种，
     # 被拦下的轮次计入 /_task-notify/status 的 filtered。
@@ -141,6 +145,8 @@ config:
 
 两个「先拦一道」的开关，顺序是：**工作区**（`onlyWorkspaces` 非空且不含当前工作区 → 直接 `return`，计数 `filteredWorkspace`）→ 状态开关（`statuses`，计数 `filtered`）→ 去重（计数 `deduped`，键 = 会话 + 轮次 + 结束原因）→ 找目标（找不到，计数 `skippedUnbound`）→ 真发（成功计 `notified`，失败计 `failed`）。`onlyWorkspaces` 的空缺省是「全部发」，所以只勾工作区不会把默认目标丢掉。
 
+异常结束（`error` / `interrupted` / `max-tokens`）还会先等 `autoContinueGraceMs`（缺省 60s）再判定：期间会话被 dsh-auto-continue 续跑接上了（事件流里出现更大的 `turn`）就吞掉这条、计入 `suppressed`，没续上才真发。`0` = 不等、立即推。
+
 `fields` 只影响正文，不影响投递与去重：全关掉时正文只剩首行（`✅ | task-notify | 工作区名`），适合只想知道「哪台机器跑完了」。`fields.brief` 摘的是事件流里已有的文本，只往外发、不写回会话，所以不会在后续每轮里重复计费。`fields.sessionId` 打开时那行给的是会话标题（重命名后就是新名字），只有标题还没生成才退回裸 id。
 
 ### 在设置里改（推荐）
@@ -150,6 +156,7 @@ config:
 卡片上能改的东西与上面配置一一对应：
 
 - 总开关「启用通知」、七种结束原因的勾选、「跳过子代理」、「会话要你选择时也提示」、消息格式；
+- 「中断/失败先等 N 秒再判定」：数字框，单位秒；期间被 dsh-auto-continue 续上就不推，`0` = 立即推；
 - 「通知里包含」：正文带哪些字段（会话标题 / 工作区 / 原因 / 答复首句 / 会话 / 时间），逐项勾；
 - 「通知哪些工作区」：把见过的工作区列出来勾（括号里是结束次数）。一个都不勾 = 全部工作区都发；
 - 投递目标列表（增删改）：启用勾、通道下拉（括号里是该通道的账户数）、`botId`、`targetId`，「选收件人」按钮会列出该账户下 dsh-im 已有的收件目标让你点。
@@ -158,7 +165,7 @@ config:
   - 该账户在 dsh-im 里一条收件目标都没有时，按钮下面会给出「去 集成 → 该机器人 → 投递设置 → 从已聊过的会话选择」的下一步，而不是把下拉藏起来。
 - 按工作区换收件目标（每行一条 `名称=channel|botId|targetId`，与「通知哪些工作区」是两件事：这里决定发给谁，那里决定发不发）；
 - 「刷新」重新读配置、「发测试通知」真发一条（不受状态开关影响，用来验证通道与账户是不是通的）；
-- 底部计数：已推送 / 未绑定跳过 / 状态过滤 / 工作区过滤 / 去重 / 失败。
+- 底部计数：已推送 / 未绑定跳过 / 状态过滤 / 工作区过滤 / 被续跑吞掉 / 去重 / 失败。
 
 卡片顶部如果写着「dsh-im 当前没有在线账户」，说明 `ctx.dshIm` 没就绪或还没配任何通道——通知会全部跳过，不会静默丢。
 
@@ -210,7 +217,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 {
   "dsh": { "profile": { "bundles": ["...", "dsh-task-notify"] } },
   "dependencies": {
-    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.8.2"
+    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.9.0"
   }
 }
 ```
@@ -219,7 +226,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 >
 > | 规格 | 场景 | 说明 |
 > | --- | --- | --- |
-> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.8.2` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
+> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.9.0` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
 > | `github:bansheng2000/dsh-task-notify` | 追 `main` 最新提交 | pnpm 会走 `git ls-remote git+ssh://git@github.com/...`，没配 ssh key 的机器 exit 128。修法：`git config --global url."https://github.com/".insteadOf "git+ssh://git@github.com/"` |
 > | `file:E:/文档/deepseek-harness/dsh-task-notify` | 本机开发 | 必须**绝对正斜杠**路径，相对路径报 `ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND` |
 >
@@ -302,6 +309,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
   "channels": [{ "channel": "weixin", "accounts": 1, "botIds": ["wx_..."] }],
   "dshImInstalled": true,
   "seen": 12, "notified": 6, "failed": 0, "skippedUnbound": 3, "deduped": 1, "filtered": 0, "filteredWorkspace": 0,
+  "suppressed": 1,
   "questions": 2,
   "last": { "sessionId": "...", "turn": 3, "reason": "completed", "at": "..." }
 }
@@ -322,6 +330,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 | 会话要你选择时没收到通知 | `notifyQuestions` 被关了；subagent 默认也不推（`skipSubagents`）。看 `questions` 计数涨没涨——涨了说明事件到了，是没绑目标或账户不在线。 |
 | 通知太吵 | `skipSubagents: true` 过滤 subagent；`statuses` 里关掉不关心的类型（如 `forked: false`、`blocked: false`）；`onlyWorkspaces` 只留常驻工作区。多轮就是一条一轮地推（有意为之，方便「每轮干完都知道」），要彻底静音就把目标 `enabled: false`。 |
 | `filtered` 涨但一条没收到 | `statuses` 把这种结束原因关了（`filtered` 数被开关拦下的轮次）。看 `statuses` 哪项是 `false`。 |
+| 任务中断了却没收到通知 | 多半是自动继续插件接手了：`error` / `interrupted` / `max-tokens` 会先等 `autoContinueGraceMs`，期间被 dsh-auto-continue 续跑接上就不推（`suppressed` 涨 1）。想无论如何都收到，把 `autoContinueGraceMs` 设为 `0`。 |
 | 同一个会话里第二轮起就收不到通知（v0.8.1 修） | 0.8.0 及以前的去重键只有「会话 + 结束原因」、漏了轮次，于是**一个会话只会推第一条**，之后每一轮都静默进 `deduped`（新建工作区里连跑几轮最明显：只看得到第一条）。0.8.1 起键里带 `turn`：每轮各推一条，同一轮的事件重放才吞。验法：同一个会话连跑两轮，`deduped` 不涨而 `notified` 按轮涨。 |
 | 某个工作区没通知、别的有 | 检查 `workspaces` 的键：先按完整 `cwd` 匹配、再按目录名匹配，两者都没命中才回落默认 `targets`。 |
 | 改了 repo 代码但行为没变 | pnpm 装进 profile 的是真实拷贝。重新跑上面的 install，或直接改 `node_modules\dsh-task-notify\lib\index.js`。 |

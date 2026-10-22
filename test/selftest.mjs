@@ -226,7 +226,7 @@ function binding(overrides = {}) {
 {
   const im = fakeIm();
   const ctx = makeCtx({ dshIm: im.service });
-  apply(ctx, binding());
+  apply(ctx, binding({ autoContinueGraceMs: 0 }));
   const reason = { kind: "error", error: { message: "502 bad gateway" } };
   ctx._emit("session/event", session("s1", "E:/x/ziyongchajian"), turnEnd(1, reason));
   ctx._emit("session/event", session("s1", "E:/x/ziyongchajian"), turnEnd(1, reason));
@@ -553,7 +553,7 @@ function binding(overrides = {}) {
 {
   const im = fakeIm();
   const ctx = makeCtx({ dshIm: im.service });
-  apply(ctx, binding({ statuses: { completed: false } }));
+  apply(ctx, binding({ statuses: { completed: false }, autoContinueGraceMs: 0 }));
   ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
   await settle();
   assert.equal(im.calls.length, 0, "completed 关掉就不发");
@@ -1246,6 +1246,46 @@ assert.equal(await withTimeout(Promise.resolve("done"), 50, "send"), "done", "�
   const rows = (status.observed ?? []).filter((item) => item.name === "dupwork");
   assert.equal(rows.length, 1, "同名工作区在卡片里仍显示一行");
   assert.equal(rows[0].count, 1, "两个同名不同路径的工作区各算 1 次（按目录名做键会累加成 2）");
+}
+
+// 66) 异常结束先等一会：没人续跑，到点照常推
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, binding({ autoContinueGraceMs: 30 }));
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "interrupted" }));
+  await settle();
+  assert.equal(im.calls.length, 0, "延迟判定期间先不发");
+  await new Promise((resolve) => setTimeout(resolve, 90));
+  assert.equal(im.calls.length, 1, "没人续跑 → 到点照常推");
+  assert.ok(im.calls[0].text.startsWith("⚠️ 任务中断"), im.calls[0].text);
+}
+
+// 67) 异常结束先等一会：期间被 auto-continue 续上（事件流出现更大 turn）→ 不推
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, binding({ autoContinueGraceMs: 30 }));
+  const s = session("s1", "E:/x/a");
+  s.events = [
+    { type: "turn/end", data: { turn: 1, reason: { kind: "interrupted" } } },
+    { type: "user/message", data: { turn: 2 } },
+  ];
+  ctx._emit("session/event", s, turnEnd(1, { kind: "interrupted" }));
+  await new Promise((resolve) => setTimeout(resolve, 90));
+  assert.equal(im.calls.length, 0, "已续跑 → 这条中断通知不推");
+  const status = await readStatus(ctx);
+  assert.equal(status.suppressed, 1, "被吞掉的计入 suppressed");
+}
+
+// 68) 完成类不受延迟影响（延迟判定只作用于异常结束）
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, binding({ autoContinueGraceMs: 60000 }));
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  assert.equal(im.calls.length, 1, "completed 立即推，不等");
 }
 
 console.log("dsh-task-notify selftest: ok");

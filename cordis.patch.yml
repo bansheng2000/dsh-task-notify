@@ -6,6 +6,9 @@
           enabled: true
           format: plain
           skipSubagents: true
+          # 异常结束（error / interrupted / max-tokens）先等这么多毫秒再判定：
+          # 期间被 dsh-auto-continue 续跑接上就不推（计入 suppressed）。0 = 立即推。
+          autoContinueGraceMs: 60000
           # 每种结束原因一个开关（全开）。关掉哪种就不再推哪种；
           # 被开关拦下的轮次计到 /_task-notify/status 的 filtered。
           statuses:
