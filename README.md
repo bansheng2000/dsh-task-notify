@@ -222,7 +222,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 {
   "dsh": { "profile": { "bundles": ["...", "dsh-task-notify"] } },
   "dependencies": {
-    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.9.0"
+    "dsh-task-notify": "https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.9.2"
   }
 }
 ```
@@ -231,7 +231,7 @@ curl http://127.0.0.1:19387/_task-notify/status
 >
 > | 规格 | 场景 | 说明 |
 > | --- | --- | --- |
-> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.9.0` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
+> | `https://codeload.github.com/bansheng2000/dsh-task-notify/tar.gz/refs/tags/v0.9.2` | **异地机器推荐** | 纯 HTTPS 下载，不碰 git，不需要任何凭据 |
 > | `github:bansheng2000/dsh-task-notify` | 追 `main` 最新提交 | pnpm 会走 `git ls-remote git+ssh://git@github.com/...`，没配 ssh key 的机器 exit 128。修法：`git config --global url."https://github.com/".insteadOf "git+ssh://git@github.com/"` |
 > | `file:E:/文档/deepseek-harness/dsh-task-notify` | 本机开发 | 必须**绝对正斜杠**路径，相对路径报 `ERR_PNPM_LINKED_PKG_DIR_NOT_FOUND` |
 >
@@ -316,11 +316,31 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
   "seen": 12, "notified": 6, "failed": 0, "skippedUnbound": 3, "deduped": 1, "filtered": 0, "filteredWorkspace": 0,
   "suppressed": 1, "skippedWatching": 0, "presence": 0,
   "questions": 2,
+  "ledger": { "file": "C:/Users/me/.dsh/task-notify/ledger.jsonl", "lines": 421,
+              "recent": [{ "at": "2026-10-25T09:43:12+08:00", "o": "sent", "sid": "session-9d45", "turn": 16, "kind": "completed", "ch": "feishu", "tgt": "tgt_de2a3d18" }] },
   "last": { "sessionId": "...", "turn": 3, "reason": "completed", "at": "..." }
 }
 ```
 
 `notified` 按**目标条数**计数（两个渠道都成功 = 2），不是按通知条数。
+
+### 事件账本："有时候不发通知"靠它查
+
+每个判定与每次投递结果都会追加一行到 `~/.dsh/task-notify/ledger.jsonl`（`TASK_NOTIFY_LEDGER` 可改路径），启动时读回来 —— 所以上面的计数是**有账以来**累计，重启不清零。每行只有结构化字段，**不含通知正文**：
+
+| `o` | 含义 |
+| --- | --- |
+| `turn` | 收到一次 `turn/end`（带 `sid` 前 12 位 / `turn` / `kind` / 工作区名） |
+| `sent` | 某个目标被平台收下（`ch` 渠道 + `tgt` 目标前 12 位） |
+| `failed` | 某个目标失败（`err` 是错误码/首行，如 `delivery-failed`、`not-accepted`） |
+| `unbound` | 没有可用目标 / 账户不在线（`err: dsh-im-missing` 或 `n` 条数） |
+| `deduped` / `filtered` / `workspace` | 被去重 / 被 `statuses` 开关 / 被 `onlyWorkspaces` 拦下 |
+| `watching` | 你在看这个会话，主动不推 |
+| `suppressed` | 异常结束但被 dsh-auto-continue 续上了，主动不推 |
+| `subagent` | 子代理轮次，按 `skipSubagents` 跳过 |
+| `question` | 收到一次待答问题（随后同样有 `sent` / `failed`） |
+
+查法：`tail -n 50 ~/.dsh/task-notify/ledger.jsonl`，或看 status 的 `ledger.recent`。文件超过 2000 行会自动压到最近 500 行。
 
 ## 常见问题排查
 
@@ -330,6 +350,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 | 加载时报 `Cannot find package '@deepseek-ai/schemastery'` | `@deepseek-ai/schemastery` 同时写进 `dependencies` 和 `peerDependencies` 时，pnpm 按 peer 处理、**不会**装进依赖树。本机因别的插件把它提升到 profile 根而假绿，干净机器上必炸。宿主侧 bare import 只能写进 `dependencies`，`peerDependencies` 留给宿主运行时自己提供的东西。 |
 | `skippedUnbound` 一直涨 | `targets` / `workspaces` 缺 botId 或 targetId（半截配置会被整项丢弃），或该 `botId` 不在 `bots` 里 / `channel` 对不上。对照状态路由的 `bots` 核对。 |
 | `notified` 涨但某个渠道没收到 | 单个目标失败不会影响其它目标，但只会在日志里留一条 warn（`send not accepted: ...` / `send failed: ...`，带 `code`）。按 `targetId` 搜日志定位是哪个目标。 |
+| 「有时候」不发通知，想查是哪一步没走通 | 看账本 `~/.dsh/task-notify/ledger.jsonl`（或 status 的 `ledger.recent`）：只有 `turn` 没后续 = 卡在某个过滤/去重；`failed` = 平台拒收（看 `err`）；`unbound` = 目标没绑或账户掉线；`watching` / `suppressed` = 按设计没推。0.9.2 之前只有内存计数、重启即清零，历史无从查证。 |
 | 微信 notified 但没收到 | `{sent:true}` 只代表平台接口接受，不代表送达。微信主动投递还需要用户消息里携带过的 `context_token`；先给机器人发一条微信消息再触发。 |
 | 某个通道 / 账户不想收了 | 把那条目标 `enabled: false`（不用删配置）；全停用等于该工作区未绑定，`skippedUnbound` 会涨、日志写 `no enabled target bound`。 |
 | 会话要你选择时没收到通知 | `notifyQuestions` 被关了；subagent 默认也不推（`skipSubagents`）。看 `questions` 计数涨没涨——涨了说明事件到了，是没绑目标或账户不在线。 |

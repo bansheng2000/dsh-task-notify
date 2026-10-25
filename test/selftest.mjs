@@ -1,7 +1,7 @@
 // dsh-task-notify 的自检：不进 DSH 宿主，用假 ctx / 假 dshIm 验证判定、文案、去重、多渠道扇出、未绑定分支。
 // 跑法：node test/selftest.mjs
 import assert from "node:assert/strict";
-import { mkdtempSync, utimesSync, writeFileSync } from "node:fs";
+import { mkdtempSync, readFileSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -17,6 +17,8 @@ process.env.DSH_STORAGES_DIR = NO_STORAGES;
 
 /** 造一个最小 ctx：只存 on / inject，dshIm 与 logger 可注入。 */
 function makeCtx({ dshIm, sessionTitle } = {}) {
+  // 每个假 ctx 一个独立账本：否则上一条用例的计数会被下一条读到（账本是跨重启累计的）。
+  process.env.TASK_NOTIFY_LEDGER = join(mkdtempSync(join(tmpdir(), "task-notify-ledger-")), "ledger.jsonl");
   const listeners = new Map();
   const logs = [];
   const routes = new Map();
@@ -1350,6 +1352,36 @@ assert.equal(await withTimeout(Promise.resolve("done"), 50, "send"), "done", "�
   ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
   await settle();
   assert.equal(im.calls.length, 1, "开关关掉 → 在看也推");
+}
+
+// 74) 事件账本：判定与投递结果落盘；重启后计数与最近记录从账本恢复（不重发）
+{
+  const im = fakeIm();
+  const ctx = makeCtx({ dshIm: im.service });
+  apply(ctx, binding());
+  const ledgerFile = process.env.TASK_NOTIFY_LEDGER;
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  // 同一轮重放：第二轮去重，账本要能看出「被去重」而不是凭空少一条
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  const entries = readFileSync(ledgerFile, "utf8").split(NL).filter(Boolean).map((line) => JSON.parse(line));
+  // 投递是 fire-and-forget，落地顺序可能晚于下一轮，所以只断言集合。
+  assert.deepEqual(entries.map((item) => item.o).sort(), ["deduped", "sent", "turn", "turn"], "账本逐条记下判定与投递结果");
+  assert.equal(entries.find((item) => item.o === "sent").ch, "weixin", "投递那一条带渠道");
+  assert.equal(entries[0].kind, "completed", "轮次那一条带结束原因");
+
+  // 换个宿主进程（新 ctx、同一个账本文件）：计数接着上次，且不会把历史轮次重推一遍。
+  const im2 = fakeIm();
+  const ctx2 = makeCtx({ dshIm: im2.service });
+  process.env.TASK_NOTIFY_LEDGER = ledgerFile;
+  apply(ctx2, binding());
+  const status = await readStatus(ctx2);
+  assert.equal(status.seen, 2, "seen 从账本恢复");
+  assert.equal(status.notified, 1, "notified 从账本恢复");
+  assert.equal(status.deduped, 1, "deduped 从账本恢复");
+  assert.equal(im2.calls.length, 0, "恢复计数不该重发历史通知");
+  assert.equal(status.ledger.lines, 4, "账本行数回带");
+  assert.ok(status.ledger.recent.some((item) => item.o === "deduped"), "最近记录带上判定结果");
 }
 
 console.log("dsh-task-notify selftest: ok");
