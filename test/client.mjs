@@ -58,10 +58,11 @@ function texts(tree) {
 }
 
 /** 假 hooks：useState 按调用顺序吐种子值（卡片里的顺序是固定的），useEffect 不跑。 */
-function loadExports(seed) {
+function loadExports(seed, windowExtra) {
   let captured = null;
   const fakeWindow = {
     __ModuleLoader__: { load: (entry) => { captured = entry; } },
+    ...(windowExtra ?? {}),
   };
   new Function("window", SOURCE)(fakeWindow);
   assert.ok(captured, "client.js 应调 window.__ModuleLoader__.load");
@@ -320,6 +321,156 @@ try {
   assert.equal(base.__sets[1].args[0] ?? null, null, "点击不能报错（静默无反应就是死在这条路径上）");
 } finally {
   globalThis.fetch = realFetchMutate;
+}
+
+// 4d) 桌面提醒通道（0.10.0）：轮询 /alerts → 弹气泡 + 响提示音 + 标签页未读，点气泡跳会话
+{
+  // client.js 里的 installDesktop 直接摸 window / document / Notification / fetch，
+  // 这里给它们造一套最小替身，跑真正的消费逻辑（不是断言源码里有没有那几行）。
+  const notifications = [];
+  const opened = [];
+  const tones = [];
+  let payload = { since: 0, alerts: [], desktop: { notice: true, badge: true, sound: "beep", soundUrl: "" } };
+
+  const listeners = { window: {}, document: {} };
+  const fakeWindow = {
+    focus: () => {},
+    addEventListener: (type, fn) => { (listeners.window[type] ??= []).push(fn); },
+    AudioContext: class {
+      constructor() { this.state = "running"; this.currentTime = 0; this.destination = {}; }
+      createOscillator() {
+        return { type: "", frequency: { value: 0 }, connect: (node) => node, start: () => {}, stop: () => {} };
+      }
+      createGain() {
+        return { gain: { setValueAtTime: () => {}, exponentialRampToValueAtTime: () => {} }, connect: (node) => { tones.push(node); return node; } };
+      }
+    },
+    Audio: class { constructor(url) { this.url = url; } play() { tones.push(this.url); return Promise.resolve(); } },
+  };
+  const fakeDocument = {
+    title: "我的工作台",
+    visibilityState: "hidden",
+    addEventListener: (type, fn) => { (listeners.document[type] ??= []).push(fn); },
+  };
+  class FakeNotification {
+    static permission = "granted";
+    constructor(label, options) {
+      this.label = label;
+      this.body = options.body;
+      this.tag = options.tag;
+      this.closed = false;
+      notifications.push(this);
+    }
+    close() { this.closed = true; }
+  }
+
+  const saved = {
+    window: globalThis.window,
+    document: globalThis.document,
+    fetch: globalThis.fetch,
+    Notification: globalThis.Notification,
+  };
+  globalThis.window = fakeWindow;
+  globalThis.document = fakeDocument;
+  globalThis.Notification = FakeNotification;
+  // client.js 里的 `window` 是 ModuleLoader 传入的那个对象，不是 globalThis.window，
+  // 所以浏览器能力要挂到那个假 window 上（见 loadExports 的第二参数）。
+  let asked = [];
+  globalThis.fetch = async (url, init) => {
+    asked.push({ url, body: init?.body ? JSON.parse(init.body) : null });
+    return { status: 200, text: async () => JSON.stringify({ ok: true, value: payload }) };
+  };
+
+  // 定时器不真等 3 秒：拦下 setInterval，留一个 tick() 手动触发。
+  const savedInterval = globalThis.setInterval;
+  let tick = async () => {};
+  globalThis.setInterval = (fn) => {
+    tick = async () => { fn(); await new Promise((resolve) => setTimeout(resolve, 10)); };
+    return { unref() {} };
+  };
+
+  try {
+    const base2 = loadExports([DESCRIBED, null, null, false, null, null], fakeWindow);
+    // 宿主当前显示的是别的会话（s9）：s1 的通知该弹、该算未读；s9 的不吵。
+    const ctx = {
+      on: () => {},
+      get: (name) => {
+        if (name === "uiWorkspace") return { openSession: (id) => opened.push(id) };
+        if (name === "sidebarRight") return { mounted: { getSnapshot: () => "s9" } };
+        return undefined;
+      },
+    };
+    base2.installDesktop(ctx);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(asked.length, 1, "装了就该立刻轮一次");
+    assert.equal(asked[0].url, "/api/dsh-task-notify-settings/alerts", "走 /alerts 路由");
+    assert.deepEqual(asked[0].body, { since: 0 }, "首次游标从 0 开始");
+    assert.equal(notifications.length, 0, "没有新提醒时不打扰");
+    assert.equal(fakeDocument.title, "我的工作台", "没有新提醒时不动标题");
+
+    const base3 = loadExports([DESCRIBED, null, null, false, null, null], fakeWindow);
+    asked = [];
+    globalThis.fetch = async (url, init) => {
+      asked.push({ url, body: init?.body ? JSON.parse(init.body) : null });
+      return {
+        status: 200,
+        text: async () => JSON.stringify({
+          ok: true,
+          value: {
+            since: 2,
+            alerts: [
+              { seq: 2, sessionId: "s1", label: "✅ 任务完成", title: "重构通知", brief: "改完了", ws: "w" },
+              { seq: 3, sessionId: "s9", label: "❌ 任务失败", title: "正在看的会话", brief: "", ws: "w" },
+            ],
+            desktop: { notice: true, badge: true, sound: "beep" },
+          },
+        }),
+      };
+    };
+    // 「正看着」只可能发生在页面可见时；页签在后台就照常弹。
+    fakeDocument.visibilityState = "visible";
+    base3.installDesktop(ctx);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(notifications.length, 1, "只给不看的那条弹气泡（正看着的 s9 不吵）");
+    assert.equal(notifications[0].label, "✅ 任务完成");
+    assert.equal(notifications[0].tag, "dsh-task-notify:s1", "气泡按会话打成同一个 tag");
+    assert.ok(String(notifications[0].body).includes("重构通知"), "气泡正文带会话标题");
+    assert.equal(fakeDocument.title, "(1) 我的工作台", "标签页标题加未读前缀（正看着的 s9 不算未读）");
+    assert.ok(tones.length > 0, "同时响提示音（beep 现场合成）");
+    assert.deepEqual(asked[0].body, { since: 0 }, "第一轮用 since=0 拉全量");
+    // 手工推进定时器：换一份 payload 再轮一次，游标应带着上一轮的 since=2 去问。
+    await tick();
+    // 游标 = max(本轮最大 seq=3, value.since=2) → 3，下一轮只拉增量。
+    assert.deepEqual(asked[asked.length - 1].body, { since: 3 }, "游标推进到本轮最大 seq，下一轮只拉增量");
+
+    notifications[0].onclick();
+    assert.deepEqual(opened, ["s1"], "点气泡跳到那条会话");
+    assert.equal(notifications[0].closed, true, "点完把气泡关掉");
+
+    for (const fn of listeners.window.focus ?? []) fn();
+    assert.equal(fakeDocument.title, "我的工作台", "页面获得焦点后未读标记恢复");
+
+    // 关掉开关：不再弹也不加标记，但服务端照样计数（消费端只负责表现）
+    const base4 = loadExports([DESCRIBED, null, null, false, null, null], fakeWindow);
+    notifications.length = 0;
+    globalThis.fetch = async () => ({
+      status: 200,
+      text: async () => JSON.stringify({
+        ok: true,
+        value: { since: 1, alerts: [{ seq: 1, sessionId: "s2", label: "✅", title: "t", brief: "", ws: "w" }], desktop: { notice: false, badge: false, sound: "none" } },
+      }),
+    });
+    base4.installDesktop(ctx);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(notifications.length, 0, "desktopNotice 关掉就不弹");
+    assert.equal(fakeDocument.title, "我的工作台", "titleBadge 关掉就不加未读");
+  } finally {
+    globalThis.setInterval = savedInterval;
+    globalThis.window = saved.window;
+    globalThis.document = saved.document;
+    globalThis.fetch = saved.fetch;
+    globalThis.Notification = saved.Notification;
+  }
 }
 
 // 4e) L6(i)：收件目标行的 key 按内容生成，删中间一行不会让 React 复用错行

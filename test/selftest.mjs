@@ -1413,4 +1413,32 @@ assert.equal(await withTimeout(Promise.resolve("done"), 50, "send"), "done", "�
   assert.ok(bad.body.value.alerts.length >= 2, "从头回放");
 }
 
+// 76) 「试一下桌面提醒」：宿主直接塞一条，不依赖会话结束，也不受「看着就不推」影响
+{
+  const ctx = makeCtx({ dshIm: fakeIm().service });
+  apply(ctx, binding({ targets: [], skipWhenWatching: true }));
+  const before = await callBridge(ctx, BRIDGE + "/alerts", { method: "POST", body: { since: 0 } });
+  assert.equal(before.body.value.alerts.length, 0, "一开始信箱是空的");
+
+  // 模拟「用户正看着 s9」：紧接着的 turn/end 会被吞掉，但测试提醒必须照发。
+  await callBridge(ctx, BRIDGE + "/presence", { method: "POST", body: { sessionId: "s9", visible: true, lastInputAt: Date.now() } });
+  ctx._emit("session/event", session("s9", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  const swallowed = await callBridge(ctx, BRIDGE + "/alerts", { method: "POST", body: { since: 0 } });
+  assert.equal(swallowed.body.value.alerts.length, 0, "看着的会话照旧不吵");
+
+  const made = await callBridge(ctx, BRIDGE + "/alerts/test", { method: "POST", body: {} });
+  assert.equal(made.body.ok, true, "测试提醒可发");
+  const alert = made.body.value.alerts[made.body.value.alerts.length - 1];
+  assert.equal(alert.kind, "test", "打上 test 标记，不会被当成真任务");
+  assert.equal(alert.sessionId, "", "sessionId 为空，客户端不会以为用户在看着它");
+  assert.equal(made.body.value.desktop.notice, true, "回带桌面开关");
+
+  const polled = await callBridge(ctx, BRIDGE + "/alerts", { method: "POST", body: { since: 0 } });
+  assert.equal(polled.body.value.alerts.length, 1, "测试提醒进了增量信箱");
+
+  const status = await callBridge(ctx, "/_task-notify/status", { method: "GET" });
+  assert.ok(status.body.alerts.polls >= 3, "轮询次数记在 status 里（区分「没产出」和「页面没在轮询」）");
+}
+
 console.log("dsh-task-notify selftest: ok");
