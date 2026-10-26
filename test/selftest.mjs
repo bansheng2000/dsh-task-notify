@@ -1434,6 +1434,8 @@ assert.equal(await withTimeout(Promise.resolve("done"), 50, "send"), "done", "�
   assert.equal(alert.sessionId, "", "sessionId 为空，客户端不会以为用户在看着它");
   assert.equal(made.body.value.desktop.notice, true, "回带桌面开关");
   assert.equal(made.body.value.desktop.sticky, true, "回带「气泡常驻」(noticeSticky) 开关");
+  assert.equal(typeof made.body.value.epoch, "string", "回带信箱纪元：宿主重启后编号归零，客户端要知道换了一轮");
+  assert.ok(made.body.value.epoch.length > 0, "纪元非空");
 
   const polled = await callBridge(ctx, BRIDGE + "/alerts", { method: "POST", body: { since: 0 } });
   assert.equal(polled.body.value.alerts.length, 1, "测试提醒进了增量信箱");

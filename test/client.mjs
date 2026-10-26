@@ -426,7 +426,7 @@ try {
         text: async () => JSON.stringify({
           ok: true,
           value: {
-            since: 2,
+            since: 3, // 角标是信箱里的最大编号（真实宿主总是 since = alertSeq ≥ 每条 seq）
             alerts: [
               { seq: 2, sessionId: "s1", label: "✅ 任务完成", title: "重构通知", brief: "改完了", ws: "w" },
               { seq: 3, sessionId: "s9", label: "❌ 任务失败", title: "正在看的会话", brief: "", ws: "w" },
@@ -474,6 +474,48 @@ try {
     notifications[0].onclick();
     assert.deepEqual(opened, ["s1"], "点气泡跳到那条会话");
     assert.equal(notifications[0].closed, true, "点完把气泡关掉");
+
+    // 宿主重启过：信箱从头编号（seq 回到 1），但 localStorage 里还留着上一轮的 3 ——
+    // 不认纪元就会把新提醒全当成旧的跳过（用户看到的就是「点测试不发通知了」）。
+    const freshTab = loadExports([DESCRIBED, null, null, false, null, null], fakeWindow);
+    const freshAsked = [];
+    let phase = 0;
+    globalThis.fetch = async (url, init) => {
+      freshAsked.push(init?.body ? JSON.parse(init.body) : null);
+      phase += 1;
+      const base = { epoch: "e2", desktop: { notice: true, badge: true, sound: "none" } };
+      const payloadOf = (since, alerts) => ({ status: 200, text: async () => JSON.stringify({ ok: true, value: { ...base, since, alerts } }) });
+      // 第一轮：宿主已重启，旧提醒（seq 1、2）还躺在信箱里，游标却停在 3。
+      if (phase === 1) return payloadOf(2, [
+        { seq: 1, sessionId: "t1", label: "🔔", title: "重启前的旧提醒", brief: "", ws: "w" },
+        { seq: 2, sessionId: "t2", label: "🔔", title: "重启前的旧提醒", brief: "", ws: "w" },
+      ]);
+      return payloadOf(3, [
+        { seq: 3, sessionId: "", label: "🔔 桌面提醒测试", title: "桌面提醒测试", brief: "看到这条气泡就说明通了", ws: "" },
+      ]);
+    };
+    const notifBeforeRestart = notifications.length;
+    freshTab.installDesktop(ctx);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(notifications.length, notifBeforeRestart, "换纪元那一轮不补弹旧提醒");
+    await tick();
+    assert.deepEqual(freshAsked[freshAsked.length - 1], { since: 2 }, "换纪元后游标对齐宿主当前 seq，而不是继续卡在上一轮的 3");
+    assert.equal(notifications.length, notifBeforeRestart + 1, "重启后的新提醒照常弹（这就是「点测试没反应」的回归）");
+    assert.equal(notifications[notifications.length - 1].label, "🔔 桌面提醒测试");
+
+    // 老宿主（不回带 epoch）也要能恢复：靠「编号倒退」判定重启。
+    fakeWindow.localStorage.setItem("dsh-task-notify:alertCursor", JSON.stringify({ epoch: "", seq: 3 }));
+    const legacyTab = loadExports([DESCRIBED, null, null, false, null, null], fakeWindow);
+    const legacyAsked = [];
+    globalThis.fetch = async (url, init) => {
+      legacyAsked.push(init?.body ? JSON.parse(init.body) : null);
+      return { status: 200, text: async () => JSON.stringify({ ok: true, value: { since: 2, alerts: [], desktop: { notice: true, badge: true, sound: "none" } } }) };
+    };
+    legacyTab.installDesktop(ctx);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(legacyAsked[0], { since: 3 }, "老宿主：先用旧游标问一次");
+    await tick();
+    assert.deepEqual(legacyAsked[legacyAsked.length - 1], { since: 2 }, "编号倒退（宿主重启）时游标跟着退回去，不再卡死");
 
     for (const fn of listeners.window.focus ?? []) fn();
     assert.equal(fakeDocument.title, "我的工作台", "页面获得焦点后未读标记恢复");

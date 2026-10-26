@@ -391,6 +391,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 | 某个通道 / 账户不想收了 | 把那条目标 `enabled: false`（不用删配置）；全停用等于该工作区未绑定，`skippedUnbound` 会涨、日志写 `no enabled target bound`。 |
 | 会话要你选择时没收到通知 | `notifyQuestions` 被关了；subagent 默认也不推（`skipSubagents`）。看 `questions` 计数涨没涨——涨了说明事件到了，是没绑目标或账户不在线。 |
 | 我明明在看这个会话，它还推了 | 判定要求三条同时成立：页面可见、上报还新鲜、最近 `afkAfterMs` 内有鼠标/键盘操作。只看不动的画面超过 2 分钟就会被当作人不在（这是刻意的，宁可多推）；`skipWhenWatching` 关掉、或 `afkAfterMs` 调小都会让它更容易推。`presence` 为 0 说明客户端根本没上报（CLI / 没开 Web GUI / 老宿主没有 `sidebarRight.mounted`）。 |
+| 重启过 DSH 之后，点「试一下桌面提醒」没反应 | 宿主重启后信箱从 seq 1 重新编号，而浏览器里记着上一轮的消费游标（比如 6）——新版客户端会按信箱纪元（`epoch`）或编号倒退自动对齐（0.10.4+），刷新页面即可；更老的版本若卡住，手动清掉 localStorage 的 `dsh-task-notify:alertCursor` 再刷新。 |
 | 桌面气泡 / 提示音 / 标签页标记都没有 | 这三样只活在前端：页面得开着（关掉页面只剩 IM），`desktopNotice` / `titleBadge` 得勾上，提示音别选 `none`。看 status 的 `alerts.since` 涨没涨——涨了说明提醒已产出，是浏览器侧没弹（权限被拒 / 标签页不在前台）。 |
 | 点桌面气泡没跳过去 | 老宿主没有 `uiWorkspace.openSession` 时会退回 `sessions.open`，两者都不可用（比如权限缺）就只切回窗口。气泡按会话 id 打 tag，同一会话多条只留最新一条。 |
 | 点了「试一下桌面提醒」也没有气泡 | 先看卡片右侧那行权限状态：显示「还没允许通知」就点「允许系统通知…」；「已拒绝」就去地址栏站点设置改回允许。再查 Windows 通知设置：专注助手/勿扰模式，以及「Google Chrome / 该浏览器」的通知开关。status 里 `alerts.polls` 不涨说明页面根本没在轮询（页面要刷新到新版本，或开着的是别的主机端口）。 |
