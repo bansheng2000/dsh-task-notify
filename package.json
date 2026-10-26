@@ -1,6 +1,6 @@
 {
   "name": "dsh-task-notify",
-  "version": "0.10.2",
+  "version": "0.10.3",
   "description": "任务完成 / 失败 / 取消时通过 dsh-im 推通知，支持多渠道多账户扇出（覆盖全部工作区，按轮去重）；会话要你做选择时（ask_user_question）也推一条，开关、正文包含哪些字段、通知哪些工作区与收件目标都在设置里可改，正文还能带上本轮答复首句（本地摘取，不调模型、0 token）；异常结束（中断/失败）先等一会，被 dsh-auto-continue 续上就不推；打开着页面时还会弹 Windows 系统通知（点一下跳回那条会话）、响提示音、在标签页标题上标未读。",
   "type": "module",
   "main": "lib/index.js",

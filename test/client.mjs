@@ -191,7 +191,7 @@ assert.ok(String(unloaded.__sets[1].args[0]).includes("先点「刷新」"), "�
 const tree = base.NotifyCard({});
 const nodes = walk(tree);
 const boxes = nodes.filter((node) => node.type === "input" && node.props?.type === "checkbox");
-assert.equal(boxes.length, 1 + 7 + 3 + 2 + 2 + 6 + 2, "总开关 + 七个状态 + 跳过子代理 + 待答问题 + 我在看就不推 + 桌面通知/标签页未读 + 每个收件目标一个启用勾 + 六个正文字段 + 两个见过的工作区");
+assert.equal(boxes.length, 1 + 7 + 3 + 2 + 2 + 7 + 2, "总开关 + 七个状态 + 跳过子代理 + 待答问题 + 我在看就不推 + 桌面通知/常驻/标签页未读 + 每个收件目标一个启用勾 + 六个正文字段 + 两个见过的工作区");
 assert.equal(boxes[0].props.checked, true, "总开关跟着 enabled");
 assert.deepEqual(
   boxes.slice(1, 8).map((node) => node.props.checked),
@@ -286,9 +286,9 @@ try {
 }
 
 // 10) 正文可配（「通知里包含」）+ 工作区可勾（「通知哪些工作区」）：勾一下就要写回配置
-const fieldBoxes = boxes.slice(13, 19);
+const fieldBoxes = boxes.slice(14, 20);
 assert.deepEqual(fieldBoxes.map((node) => node.props.checked), [true, true, true, true, false, false], "字段缺省：标题/工作区/原因/答复首句勾上，会话 id 与时间不勾");
-const wsBoxes = boxes.slice(19, 21);
+const wsBoxes = boxes.slice(20, 22);
 assert.deepEqual(wsBoxes.map((node) => node.props.checked), [true, false], "工作区勾选跟着 onlyWorkspaces（只勾了 alpha）");
 
 let posted = null;
@@ -367,6 +367,7 @@ try {
       this.body = options.body;
       this.tag = options.tag;
       this.closed = false;
+      this.requireInteraction = options.requireInteraction;
       notifications.push(this);
     }
     close() { this.closed = true; }
@@ -442,6 +443,7 @@ try {
     assert.equal(notifications.length, 1, "只给不看的那条弹气泡（正看着的 s9 不吵）");
     assert.equal(notifications[0].label, "✅ 任务完成");
     assert.equal(notifications[0].tag, "dsh-task-notify:s1", "气泡按会话打成同一个 tag");
+    assert.equal(notifications[0].requireInteraction, true, "气泡默认常驻：不点不自己滑走");
     assert.ok(String(notifications[0].body).includes("重构通知"), "气泡正文带会话标题");
     assert.equal(fakeDocument.title, "(1) 我的工作台", "标签页标题加未读前缀（正看着的 s9 不算未读）");
     assert.ok(tones.length > 0, "同时响提示音（beep 现场合成）");
@@ -487,6 +489,33 @@ try {
       }),
     });
     base4.installDesktop(ctx);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    // 常驻可以关掉：requireInteraction false 就是系统默认时长（几秒后自己消失）。
+    const base5 = loadExports([DESCRIBED, null, null, false, null, null], fakeWindow);
+    notifications.length = 0;
+    globalThis.fetch = async () => ({
+      status: 200,
+      text: async () => JSON.stringify({
+        ok: true,
+        value: { since: 99, alerts: [{ seq: 99, sessionId: "s7", label: "✅", title: "t", brief: "", ws: "w" }], desktop: { notice: true, badge: false, sound: "none", sticky: false } },
+      }),
+    });
+    base5.installDesktop(ctx);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(notifications.length, 1, "noticeSticky 关掉仍然弹，只是不常驻");
+    assert.equal(notifications[0].requireInteraction, false, "关掉常驻后按系统默认时长消失");
+
+    // 收尾：把「都不弹」这一档也走一遍
+    const base4b = loadExports([DESCRIBED, null, null, false, null, null], fakeWindow);
+    notifications.length = 0;
+    globalThis.fetch = async () => ({
+      status: 200,
+      text: async () => JSON.stringify({
+        ok: true,
+        value: { since: 100, alerts: [{ seq: 100, sessionId: "s8", label: "✅", title: "t", brief: "", ws: "w" }], desktop: { notice: false, badge: false, sound: "none", sticky: true } },
+      }),
+    });
+    base4b.installDesktop(ctx);
     await new Promise((resolve) => setTimeout(resolve, 10));
     assert.equal(notifications.length, 0, "desktopNotice 关掉就不弹");
     assert.equal(fakeDocument.title, "我的工作台", "titleBadge 关掉就不加未读");

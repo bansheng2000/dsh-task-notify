@@ -19,6 +19,7 @@
           #   titleBadge    = 标签页标题前加未读标记，看过后自动恢复
           #   sound         = none / beep / chime / custom（custom 用 soundUrl）
           desktopNotice: true
+          noticeSticky: true
           titleBadge: true
           sound: beep
           soundUrl: ""

@@ -81,6 +81,7 @@ IM 通知要经过微信/飞书，慢、还有 12 小时窗口这类坑；人就
 | 设置 | 缺省 | 作用 |
 | --- | --- | --- |
 | `desktopNotice` | `true` | 弹 Windows 系统原生通知（浏览器 Notification）。点气泡 → 回到页面并跳到那条会话 |
+| `noticeSticky` | `true` | 气泡常驻：置 `requireInteraction`，Windows 上要人点一下或关掉才消失，不会几秒自己滑走（系统「通知显示时长」/专注助手仍可能截断） |
 | `titleBadge` | `true` | 标签页标题前加未读标记，如 `(2) 我的工作台`；页面被激活查看后自动恢复 |
 | `sound` | `beep` | `none` / `beep` / `chime` / `custom`；beep 与 chime 是现场合成的，不需要音频文件 |
 | `soundUrl` | `""` | `sound` 为 `custom` 时的音频地址（`https://…/ding.mp3`） |
@@ -89,6 +90,7 @@ IM 通知要经过微信/飞书，慢、还有 12 小时窗口这类坑；人就
 
 - **只在打开着 DSH Web 页面时有效**——气泡、提示音、标题标记都是浏览器能力，页面关着就只有 IM 通知（这是浏览器 API 的边界，不是漏做）。
 - **正看着那条会话就不吵**：页面可见、且侧栏停在这条会话上时，这一条连桌面提示一起跳过（和 `skipWhenWatching` 是同一套判断）。
+- **气泡常驻**：默认置 `requireInteraction: true`，任务完成的气泡会一直挂在屏幕上直到你点它或关掉；嫌吵就把卡片的「气泡常驻」取消勾选，回到系统默认的几秒自动消失。同一会话的新提醒按 tag 覆盖旧的，不会堆满屏。
 - **点气泡跳转**：优先 `uiWorkspace.openSession(sessionId)`，老宿主退回 `sessions.open(sessionId)`。跳到的是**那条会话**，不是工作区首页。
 - **提示音需要一次用户手势**：浏览器禁止自动播放音频，页面加载后点一下（比如点「试听」）就解锁了，之后都能自动响。
 - **系统通知权限**：第一次点「允许系统通知…」时浏览器会问；被拒了就在地址栏左侧站点设置里改成允许，再点一次。权限没给时其它两样照旧工作。
@@ -117,6 +119,7 @@ config:
 
     # 桌面提醒（只在打开着 DSH Web 页面时有效，与 IM 投递互不影响）：
     desktopNotice: true    # 弹 Windows 系统原生通知，点一下跳回并定位到那条会话
+    noticeSticky: true     # 气泡常驻：不点不消失（Windows 系统「通知显示时长」仍可能截断）
     titleBadge: true       # 标签页标题前加未读标记，看过后自动恢复
     sound: beep            # none | beep | chime | custom（custom 用 soundUrl）
     soundUrl: ""           # sound=custom 时的音频地址
@@ -200,7 +203,7 @@ config:
 - 按工作区换收件目标（每行一条 `名称=channel|botId|targetId`，与「通知哪些工作区」是两件事：这里决定发给谁，那里决定发不发）；
 - 「刷新」重新读配置、「发测试通知」真发一条（不受状态开关影响，用来验证通道与账户是不是通的）；
 - 「我在看这个会话时不推」勾 +「无操作 N 秒算离开」数字框：判定窗口直接在卡片上改；
-- 「桌面上也叫一声」：系统通知勾、标签页未读勾、提示音下拉 +「试听」按钮 +「试一下桌面提醒」按钮 +「允许系统通知…」按钮（`custom` 时多一个音源地址输入框）；
+- 「桌面上也叫一声」：系统通知勾、气泡常驻勾、标签页未读勾、提示音下拉 +「试听」按钮 +「试一下桌面提醒」按钮 +「允许系统通知…」按钮（`custom` 时多一个音源地址输入框）；
 - 底部计数：已推送 / 未绑定跳过 / 状态过滤 / 工作区过滤 / 被续跑吞掉 / 被看着跳过 / 去重 / 失败。
 
 卡片顶部如果写着「dsh-im 当前没有在线账户」，说明 `ctx.dshIm` 没就绪或还没配任何通道——通知会全部跳过，不会静默丢。
@@ -334,7 +337,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 {
   "ok": true, "active": true, "format": "plain", "skipSubagents": true,
   "notifyQuestions": true, "skipWhenWatching": true, "afkAfterMs": 120000,
-  "desktopNotice": true, "titleBadge": true, "sound": "beep", "soundUrl": "",
+  "desktopNotice": true, "noticeSticky": true, "titleBadge": true, "sound": "beep", "soundUrl": "",
   "statuses": { "completed": true, "error": true, "aborted": true, "blocked": true,
                 "max-tokens": true, "interrupted": true, "forked": true },
   "targets": [{ "channel": "weixin", "botId": "wx_...", "targetId": "tgt_...", "enabled": true }],
@@ -391,6 +394,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 | 桌面气泡 / 提示音 / 标签页标记都没有 | 这三样只活在前端：页面得开着（关掉页面只剩 IM），`desktopNotice` / `titleBadge` 得勾上，提示音别选 `none`。看 status 的 `alerts.since` 涨没涨——涨了说明提醒已产出，是浏览器侧没弹（权限被拒 / 标签页不在前台）。 |
 | 点桌面气泡没跳过去 | 老宿主没有 `uiWorkspace.openSession` 时会退回 `sessions.open`，两者都不可用（比如权限缺）就只切回窗口。气泡按会话 id 打 tag，同一会话多条只留最新一条。 |
 | 点了「试一下桌面提醒」也没有气泡 | 先看卡片右侧那行权限状态：显示「还没允许通知」就点「允许系统通知…」；「已拒绝」就去地址栏站点设置改回允许。再查 Windows 通知设置：专注助手/勿扰模式，以及「Google Chrome / 该浏览器」的通知开关。status 里 `alerts.polls` 不涨说明页面根本没在轮询（页面要刷新到新版本，或开着的是别的主机端口）。 |
+| 气泡几秒就自己消失了 | 想要一直挂着就勾上「气泡常驻」（`noticeSticky`，置 `requireInteraction`）；Windows 的「设置 → 辅助功能 → 视觉效果/通知」里的显示时长、以及专注助手/勿扰模式优先级更高，那部分插件改不了。 |
 | 提示音不响、只弹气泡 | 浏览器禁止无手势自动播放：页面加载后点一次「试听」（或任意点击）即解锁。音量/静音是系统与浏览器标签页各自的设置，插件不改它们。 |
 | 标签页一直是 `(1)` 不恢复 | 标记只在页面重新可见或窗口获得焦点时清；一直挂着不动就会一直挂着（这是刻意的，提醒你还没回那条会话）。 |
 | 通知太吵 | `skipSubagents: true` 过滤 subagent；`statuses` 里关掉不关心的类型（如 `forked: false`、`blocked: false`）；`onlyWorkspaces` 只留常驻工作区。多轮就是一条一轮地推（有意为之，方便「每轮干完都知道」），要彻底静音就把目标 `enabled: false`。 |
