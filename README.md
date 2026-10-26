@@ -15,6 +15,7 @@
 - **哪些工作区发**：`onlyWorkspaces`（或卡片上勾工作区）为空 = 全部工作区都发；非空则先按工作区拦一道，被拦下的算 `filteredWorkspace`，不算失败。卡片里的勾选列表**读宿主登记的全部工作区**（`~/.dsh/storages/workspace.json`），不是只列跑过的。
 - **正文可裁剪**：`fields` 决定正文带「会话标题 / 工作区 / 原因 / 答复首句 / 会话 / 时间」哪几项，全关也仍有一条首行（谁、什么状态）。
 - **顺带一句结论**：`fields.brief`（缺省开）把本轮最后一条回复的首句摘进正文「内容:」那行——插件在本地读会话事件流，**不调模型、不花 token**。
+- **桌面上也叫一声**（只在打开着 DSH Web 页面时有效）：弹 Windows 系统原生通知（点气泡跳回并定位到那条会话）、响提示音（`none` / `beep` / `chime` / `custom` 音源地址）、标签页标题前加未读标记（`(1)`，看过后自动恢复）。与 IM 投递**彼此独立**：没绑 dsh-im 也照样弹，绑了也不受影响。
 - **设置里可改**：插件自带设置卡片（设置 → 插件 → dsh-task-notify → 行配置），开关、状态过滤、正文包含哪些字段、通知哪些工作区、目标列表、工作区规则都能改，**落盘即生效，不用重启**。
 
 ## 通知长什么样
@@ -73,6 +74,28 @@
 
 最多列 3 道题、每题前 6 个选项，整块超 300 字截断加 `…`——手机上刷一屏就够，别把微信刷爆。
 
+## 桌面提醒：系统通知 / 提示音 / 标签页未读
+
+IM 通知要经过微信/飞书，慢、还有 12 小时窗口这类坑；人就在电脑前时，直接让电脑叫一声更快。这三样在 **Web 客户端**里做（`lib/client.js`），开关在设置卡片的「桌面上也叫一声」一块：
+
+| 设置 | 缺省 | 作用 |
+| --- | --- | --- |
+| `desktopNotice` | `true` | 弹 Windows 系统原生通知（浏览器 Notification）。点气泡 → 回到页面并跳到那条会话 |
+| `titleBadge` | `true` | 标签页标题前加未读标记，如 `(2) 我的工作台`；页面被激活查看后自动恢复 |
+| `sound` | `beep` | `none` / `beep` / `chime` / `custom`；beep 与 chime 是现场合成的，不需要音频文件 |
+| `soundUrl` | `""` | `sound` 为 `custom` 时的音频地址（`https://…/ding.mp3`） |
+
+行为细节：
+
+- **只在打开着 DSH Web 页面时有效**——气泡、提示音、标题标记都是浏览器能力，页面关着就只有 IM 通知（这是浏览器 API 的边界，不是漏做）。
+- **正看着那条会话就不吵**：页面可见、且侧栏停在这条会话上时，这一条连桌面提示一起跳过（和 `skipWhenWatching` 是同一套判断）。
+- **点气泡跳转**：优先 `uiWorkspace.openSession(sessionId)`，老宿主退回 `sessions.open(sessionId)`。跳到的是**那条会话**，不是工作区首页。
+- **提示音需要一次用户手势**：浏览器禁止自动播放音频，页面加载后点一下（比如点「试听」）就解锁了，之后都能自动响。
+- **系统通知权限**：第一次点「允许系统通知…」时浏览器会问；被拒了就在地址栏左侧站点设置里改成允许，再点一次。权限没给时其它两样照旧工作。
+- 桌面提醒**不依赖 dsh-im**：没绑任何收件目标、或 IM 那条路失败了，电脑上照样会有气泡。计数看 status 的 `alerts.since`（产出条数）。
+
+宿主 → 客户端的通道是一个内存信箱：`POST /api/dsh-task-notify-settings/alerts`（body `{since}`）返回 `{since, alerts, desktop}`，客户端每 3 秒轮一次、按游标取增量。用 POST 而不是 `GET ?since=` 是因为桥的路由按精确路径匹配，查询串会丢。
+
 ## 配置
 
 插件不调 `ctx.settings.register()`，直接导出 `Config`；配置写在 loader 条目 `task-notify` 的 `config.rules` 下（见 `cordis.patch.yml`），也可被设置卡片覆盖。
@@ -90,6 +113,12 @@ config:
     # 你正在看这个会话（页面停在它上面 + 最近有输入）就不推；多久没输入算离开。
     skipWhenWatching: true
     afkAfterMs: 120000
+
+    # 桌面提醒（只在打开着 DSH Web 页面时有效，与 IM 投递互不影响）：
+    desktopNotice: true    # 弹 Windows 系统原生通知，点一下跳回并定位到那条会话
+    titleBadge: true       # 标签页标题前加未读标记，看过后自动恢复
+    sound: beep            # none | beep | chime | custom（custom 用 soundUrl）
+    soundUrl: ""           # sound=custom 时的音频地址
 
     # 每种结束原因一个开关，全开。关掉哪种就不再推哪种，
     # 被拦下的轮次计入 /_task-notify/status 的 filtered。
@@ -170,6 +199,7 @@ config:
 - 按工作区换收件目标（每行一条 `名称=channel|botId|targetId`，与「通知哪些工作区」是两件事：这里决定发给谁，那里决定发不发）；
 - 「刷新」重新读配置、「发测试通知」真发一条（不受状态开关影响，用来验证通道与账户是不是通的）；
 - 「我在看这个会话时不推」勾 +「无操作 N 秒算离开」数字框：判定窗口直接在卡片上改；
+- 「桌面上也叫一声」：系统通知勾、标签页未读勾、提示音下拉 +「试听」按钮 +「允许系统通知…」按钮（`custom` 时多一个音源地址输入框）；
 - 底部计数：已推送 / 未绑定跳过 / 状态过滤 / 工作区过滤 / 被续跑吞掉 / 被看着跳过 / 去重 / 失败。
 
 卡片顶部如果写着「dsh-im 当前没有在线账户」，说明 `ctx.dshIm` 没就绪或还没配任何通道——通知会全部跳过，不会静默丢。
@@ -303,6 +333,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 {
   "ok": true, "active": true, "format": "plain", "skipSubagents": true,
   "notifyQuestions": true, "skipWhenWatching": true, "afkAfterMs": 120000,
+  "desktopNotice": true, "titleBadge": true, "sound": "beep", "soundUrl": "",
   "statuses": { "completed": true, "error": true, "aborted": true, "blocked": true,
                 "max-tokens": true, "interrupted": true, "forked": true },
   "targets": [{ "channel": "weixin", "botId": "wx_...", "targetId": "tgt_...", "enabled": true }],
@@ -316,6 +347,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
   "seen": 12, "notified": 6, "failed": 0, "skippedUnbound": 3, "deduped": 1, "filtered": 0, "filteredWorkspace": 0,
   "suppressed": 1, "skippedWatching": 0, "presence": 0,
   "questions": 2,
+  "alerts": { "since": 37 },
   "ledger": { "file": "C:/Users/me/.dsh/task-notify/ledger.jsonl", "lines": 421,
               "recent": [{ "at": "2026-10-25T09:43:12+08:00", "o": "sent", "sid": "session-9d45", "turn": 16, "kind": "completed", "ch": "feishu", "tgt": "tgt_de2a3d18" }] },
   "last": { "sessionId": "...", "turn": 3, "reason": "completed", "at": "..." }
@@ -355,6 +387,10 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 | 某个通道 / 账户不想收了 | 把那条目标 `enabled: false`（不用删配置）；全停用等于该工作区未绑定，`skippedUnbound` 会涨、日志写 `no enabled target bound`。 |
 | 会话要你选择时没收到通知 | `notifyQuestions` 被关了；subagent 默认也不推（`skipSubagents`）。看 `questions` 计数涨没涨——涨了说明事件到了，是没绑目标或账户不在线。 |
 | 我明明在看这个会话，它还推了 | 判定要求三条同时成立：页面可见、上报还新鲜、最近 `afkAfterMs` 内有鼠标/键盘操作。只看不动的画面超过 2 分钟就会被当作人不在（这是刻意的，宁可多推）；`skipWhenWatching` 关掉、或 `afkAfterMs` 调小都会让它更容易推。`presence` 为 0 说明客户端根本没上报（CLI / 没开 Web GUI / 老宿主没有 `sidebarRight.mounted`）。 |
+| 桌面气泡 / 提示音 / 标签页标记都没有 | 这三样只活在前端：页面得开着（关掉页面只剩 IM），`desktopNotice` / `titleBadge` 得勾上，提示音别选 `none`。看 status 的 `alerts.since` 涨没涨——涨了说明提醒已产出，是浏览器侧没弹（权限被拒 / 标签页不在前台）。 |
+| 点桌面气泡没跳过去 | 老宿主没有 `uiWorkspace.openSession` 时会退回 `sessions.open`，两者都不可用（比如权限缺）就只切回窗口。气泡按会话 id 打 tag，同一会话多条只留最新一条。 |
+| 提示音不响、只弹气泡 | 浏览器禁止无手势自动播放：页面加载后点一次「试听」（或任意点击）即解锁。音量/静音是系统与浏览器标签页各自的设置，插件不改它们。 |
+| 标签页一直是 `(1)` 不恢复 | 标记只在页面重新可见或窗口获得焦点时清；一直挂着不动就会一直挂着（这是刻意的，提醒你还没回那条会话）。 |
 | 通知太吵 | `skipSubagents: true` 过滤 subagent；`statuses` 里关掉不关心的类型（如 `forked: false`、`blocked: false`）；`onlyWorkspaces` 只留常驻工作区。多轮就是一条一轮地推（有意为之，方便「每轮干完都知道」），要彻底静音就把目标 `enabled: false`。 |
 | `filtered` 涨但一条没收到 | `statuses` 把这种结束原因关了（`filtered` 数被开关拦下的轮次）。看 `statuses` 哪项是 `false`。 |
 | 任务中断了却没收到通知 | 多半是自动继续插件接手了：`error` / `interrupted` / `max-tokens` 会先等 `autoContinueGraceMs`，期间被 dsh-auto-continue 续跑接上就不推（`suppressed` 涨 1）。想无论如何都收到，把 `autoContinueGraceMs` 设为 `0`。 |
@@ -373,7 +409,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 
 ```
 lib/index.js       插件本体（Config / apply / 文案 / 去重 / 多渠道扇出 / 状态路由 / 桥接线）
-lib/bridge.js      设置桥：describe / mutate / targets / test 四个只读回环路由
+lib/bridge.js      设置桥：describe / mutate / targets / test / presence / alerts 回环路由
 lib/client.js      设置卡片（window.__ModuleLoader__.load 形态，挂 plugins.row.config）
 cordis.patch.yml   bundle patch（- insert: 创建 loader 条目 + 配置示例）
 package.json       main=lib/index.js, exports./client=lib/client.js, dsh.bundle.patch / dsh.client

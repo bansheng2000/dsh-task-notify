@@ -1384,4 +1384,33 @@ assert.equal(await withTimeout(Promise.resolve("done"), 50, "send"), "done", "�
   assert.ok(status.ledger.recent.some((item) => item.o === "deduped"), "最近记录带上判定结果");
 }
 
+// 75) 桌面提醒信箱：没有绑定任何收件目标也要产出一条（电脑上先叫一声），客户端按 since 增量取
+{
+  const ctx = makeCtx({ dshIm: fakeIm().service });
+  apply(ctx, binding({ targets: [] }));
+  ctx._emit("session/event", session("s1", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  const first = await callBridge(ctx, BRIDGE + "/alerts", { method: "POST", body: { since: 0 } });
+  assert.equal(first.body.ok, true, "信箱可读");
+  assert.equal(first.body.value.alerts.length, 1, "没配 IM 目标也产出桌面提醒");
+  assert.equal(first.body.value.alerts[0].kind, "completed", "带上结束原因");
+  assert.equal(first.body.value.alerts[0].sessionId, "s1", "带上会话 id，点气泡才能跳过去");
+  assert.equal(first.body.value.desktop.notice, true, "同时回带桌面开关");
+  assert.equal(first.body.value.desktop.sound, "beep", "回带提示音设置");
+  const cursor = first.body.value.since;
+  assert.ok(cursor > 0, "返回游标");
+
+  ctx._emit("session/event", session("s2", "E:/x/a"), turnEnd(1, { kind: "completed" }));
+  await settle();
+  const next = await callBridge(ctx, BRIDGE + "/alerts", { method: "POST", body: { since: cursor } });
+  assert.equal(next.body.value.alerts.length, 1, "增量只回新的那条");
+  assert.equal(next.body.value.alerts[0].sessionId, "s2");
+  const again = await callBridge(ctx, BRIDGE + "/alerts", { method: "POST", body: { since: next.body.value.since } });
+  assert.equal(again.body.value.alerts.length, 0, "没有新提醒时返回空数组");
+
+  const bad = await callBridge(ctx, BRIDGE + "/alerts", { method: "POST", body: { since: "x" } });
+  assert.equal(bad.body.ok, true, "垃圾游标按 0 处理，不报错");
+  assert.ok(bad.body.value.alerts.length >= 2, "从头回放");
+}
+
 console.log("dsh-task-notify selftest: ok");

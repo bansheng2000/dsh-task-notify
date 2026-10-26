@@ -14,6 +14,14 @@
           skipWhenWatching: true
           # 多久没有鼠标/键盘输入算「人不在」（毫秒），超过就照常推。
           afkAfterMs: 120000
+          # 桌面提醒（只在打开着 DSH Web 页面时有效，走的不是 IM）：
+          #   desktopNotice = 弹 Windows 系统原生气泡，点一下跳回并定位到那条会话
+          #   titleBadge    = 标签页标题前加未读标记，看过后自动恢复
+          #   sound         = none / beep / chime / custom（custom 用 soundUrl）
+          desktopNotice: true
+          titleBadge: true
+          sound: beep
+          soundUrl: ""
           # 每种结束原因一个开关（全开）。关掉哪种就不再推哪种；
           # 被开关拦下的轮次计到 /_task-notify/status 的 filtered。
           statuses:

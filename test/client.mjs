@@ -190,7 +190,7 @@ assert.ok(String(unloaded.__sets[1].args[0]).includes("先点「刷新」"), "�
 const tree = base.NotifyCard({});
 const nodes = walk(tree);
 const boxes = nodes.filter((node) => node.type === "input" && node.props?.type === "checkbox");
-assert.equal(boxes.length, 1 + 7 + 3 + 2 + 6 + 2, "总开关 + 七个状态 + 跳过子代理 + 待答问题 + 我在看就不推 + 每个收件目标一个启用勾 + 六个正文字段 + 两个见过的工作区");
+assert.equal(boxes.length, 1 + 7 + 3 + 2 + 2 + 6 + 2, "总开关 + 七个状态 + 跳过子代理 + 待答问题 + 我在看就不推 + 桌面通知/标签页未读 + 每个收件目标一个启用勾 + 六个正文字段 + 两个见过的工作区");
 assert.equal(boxes[0].props.checked, true, "总开关跟着 enabled");
 assert.deepEqual(
   boxes.slice(1, 8).map((node) => node.props.checked),
@@ -198,18 +198,26 @@ assert.deepEqual(
   "aborted / forked 在配置里关了，卡上就得是未勾选",
 );
 const picks = nodes.filter((node) => node.type === "select");
-assert.equal(picks.length, 3, "format 下拉 + 两个目标的 channel 下拉");
+assert.equal(picks.length, 4, "format 下拉 + 提示音下拉 + 两个目标的 channel 下拉");
 assert.deepEqual(picks[0].props.children.map((o) => o.props.value), ["plain", "markdown"], "第一个下拉是消息格式");
 assert.equal(picks[0].props.value, "plain");
-assert.deepEqual(picks.slice(1).map((node) => node.props.value), ["weixin", "telegram"], "后面两个是各目标的通道");
-assert.deepEqual(picks[1].props.children.map((o) => o.props.value), ["weixin"]);
-assert.equal(picks[1].props.children[0].props.children, "weixin（1）", "下拉上带该通道的账户数");
+assert.deepEqual(picks[1].props.children.map((o) => o.props.value), ["none", "beep", "chime", "custom"], "第二个下拉是提示音");
+assert.equal(picks[1].props.value, "beep", "没配过就是缺省的 beep");
+assert.deepEqual(picks.slice(2).map((node) => node.props.value), ["weixin", "telegram"], "后面两个是各目标的通道");
+assert.deepEqual(picks[2].props.children.map((o) => o.props.value), ["weixin"]);
+assert.equal(picks[2].props.children[0].props.children, "weixin（1）", "下拉上带该通道的账户数");
 const spans = nodes.filter((node) => node.type === "span").map((node) => node.props.children);
 assert.ok(spans.includes("启用通知"));
 assert.ok(spans.includes("跳过子代理"));
 assert.ok(spans.includes("会话要你选择时也提示"));
 assert.ok(spans.includes("我在看这个会话时不推"));
 assert.ok(spans.includes("秒算离开"), "afkAfterMs 有秒数输入框");
+assert.ok(spans.includes("系统通知（点一下跳到那条会话）"), "卡片上有系统通知开关");
+assert.ok(spans.includes("标签页未读标记"), "卡片上有标签页未读开关");
+assert.ok(
+  nodes.some((node) => node.type === "button" && node.props?.children === "试听"),
+  "提示音可以试听",
+);
 const flat = JSON.stringify(tree);
 assert.ok(flat.includes("tgt_1a2b3c4d5e6f7890"), "已填的 targetId 显示在输入框里");
 assert.ok(flat.includes("ziyongchajian=weixin"), "工作区规则回填到 textarea");
@@ -253,7 +261,7 @@ assert.ok(emptyTree.includes("还没有已登记的收件目标"), "dsh-im 返�
 
 const filled = loadExports([DESCRIBED, null, null, false, null, { index: 0, options: [{ targetId: "tgt_9", name: "老王" }] }]);
 const filledSelects = walk(filled.NotifyCard({})).filter((node) => node.type === "select");
-assert.equal(filledSelects.length, 4, "有可选项时多出一个下拉（format + 两个 channel + 收件人）");
+assert.equal(filledSelects.length, 5, "有可选项时多出一个下拉（format + 提示音 + 两个 channel + 收件人）");
 const pickSelect = filledSelects.find((node) => JSON.stringify(node.props.children).includes("tgt_9"));
 assert.ok(pickSelect, "下拉里列着 dsh-im 返回的那个 targetId");
 
@@ -277,9 +285,9 @@ try {
 }
 
 // 10) 正文可配（「通知里包含」）+ 工作区可勾（「通知哪些工作区」）：勾一下就要写回配置
-const fieldBoxes = boxes.slice(11, 17);
+const fieldBoxes = boxes.slice(13, 19);
 assert.deepEqual(fieldBoxes.map((node) => node.props.checked), [true, true, true, true, false, false], "字段缺省：标题/工作区/原因/答复首句勾上，会话 id 与时间不勾");
-const wsBoxes = boxes.slice(17, 19);
+const wsBoxes = boxes.slice(19, 21);
 assert.deepEqual(wsBoxes.map((node) => node.props.checked), [true, false], "工作区勾选跟着 onlyWorkspaces（只勾了 alpha）");
 
 let posted = null;
