@@ -346,6 +346,14 @@ try {
       }
     },
     Audio: class { constructor(url) { this.url = url; } play() { tones.push(this.url); return Promise.resolve(); } },
+    // 两个窗口共享同一份 localStorage —— 跨页去重就靠它。
+    localStorage: (() => {
+      const store = new Map();
+      return {
+        getItem: (k) => (store.has(k) ? store.get(k) : null),
+        setItem: (k, v) => { store.set(k, String(v)); },
+      };
+    })(),
   };
   const fakeDocument = {
     title: "我的工作台",
@@ -442,6 +450,24 @@ try {
     await tick();
     // 游标 = max(本轮最大 seq=3, value.since=2) → 3，下一轮只拉增量。
     assert.deepEqual(asked[asked.length - 1].body, { since: 3 }, "游标推进到本轮最大 seq，下一轮只拉增量");
+
+    // 同一个页面重复 apply（宿主热重载 / 双实例）：第二次不能起第二个轮询。
+    const askedBefore = asked.length;
+    base3.installDesktop(ctx);
+    assert.equal(asked.length, askedBefore, "同一页面只装一次（第二个轮询会把一条提醒弹两遍）");
+
+    // 另一个窗口：共享游标里已经是 3，不该把旧提醒再弹一遍。
+    const otherTab = loadExports([DESCRIBED, null, null, false, null, null], fakeWindow);
+    const otherAsked = [];
+    globalThis.fetch = async (url, init) => {
+      otherAsked.push(init?.body ? JSON.parse(init.body) : null);
+      return { status: 200, text: async () => JSON.stringify({ ok: true, value: { since: 3, alerts: [], desktop: { notice: true, badge: true, sound: "beep" } } }) };
+    };
+    const notificationsBefore = notifications.length;
+    otherTab.installDesktop(ctx);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.deepEqual(otherAsked[0], { since: 3 }, "另一个窗口带着共享游标来取，不会重放");
+    assert.equal(notifications.length, notificationsBefore, "另一个窗口不重复弹");
 
     notifications[0].onclick();
     assert.deepEqual(opened, ["s1"], "点气泡跳到那条会话");
