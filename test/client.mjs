@@ -696,4 +696,46 @@ try {
     delete globalThis.location;
   }
 }
+
+// 4g) 页内提示：桌面外壳/Windows 把系统气泡拦掉时，页面里也要看得见
+{
+  const savedDoc = globalThis.document;
+  const savedFetch = globalThis.fetch;
+  const savedSetInterval = globalThis.setInterval;
+  try {
+    const mkEl = (tag) => ({
+      tag, children: [], attrs: {}, textContent: "", parentNode: null,
+      setAttribute(key, value) { this.attrs[key] = value; },
+      appendChild(node) { this.children.push(node); node.parentNode = this; return node; },
+      removeChild(node) { this.children = this.children.filter((one) => one !== node); node.parentNode = null; return node; },
+    });
+    const body = mkEl("body");
+    globalThis.document = { body, documentElement: body, title: "工作台", visibilityState: "visible", createElement: mkEl, addEventListener: () => {} };
+    globalThis.setInterval = () => ({ unref() {} });
+    globalThis.fetch = async () => ({
+      status: 200,
+      text: async () => JSON.stringify({
+        ok: true,
+        value: { since: 1, epoch: "e1", alerts: [{ seq: 1, sessionId: "s1", kind: "completed", label: "✅ 任务完成", title: "改完了", brief: "两处都调好了", ws: "dsh-task-notify" }], desktop: { notice: false, badge: false, sound: "none", sticky: true } },
+      }),
+    });
+    // 先让本地记下同一个 epoch：否则第一轮只做「宿主重启对齐」，不消费（真实情况也是页面加载后记下新 epoch）。
+    const fakeWindow = {
+      addEventListener: () => {},
+      localStorage: { getItem: (key) => (String(key).indexOf("alertCursor") >= 0 ? JSON.stringify({ epoch: "e1", seq: 0 }) : null), setItem: () => {} },
+    };
+    const instance = loadExports([], fakeWindow);
+    instance.installDesktop({ on: () => {} });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    const toasts = body.children.filter((node) => String(node.attrs && node.attrs.style).indexOf("position:fixed") >= 0);
+    assert.equal(toasts.length, 1, "来了提醒就要在页面里冒一条（notice 关掉时只在页内提示）");
+    const flat = (node) => [node.textContent, ...node.children.map(flat)].join(" ");
+    assert.match(flat(toasts[0]), /任务完成/, "页内提示要带状态标签");
+    assert.match(flat(toasts[0]), /改完了/, "页内提示要带会话标题");
+  } finally {
+    globalThis.document = savedDoc;
+    globalThis.fetch = savedFetch;
+    globalThis.setInterval = savedSetInterval;
+  }
+}
 console.log("dsh-task-notify client selftest: ok");
