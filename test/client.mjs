@@ -440,12 +440,13 @@ try {
     fakeDocument.visibilityState = "visible";
     base3.installDesktop(ctx);
     await new Promise((resolve) => setTimeout(resolve, 10));
-    assert.equal(notifications.length, 1, "只给不看的那条弹气泡（正看着的 s9 不吵）");
+    assert.equal(notifications.length, 2, "桌面气泡跟投递飞书同一套判定：宿主放行几条就弹几条（客户端不再自己判「正在看」）");
     assert.equal(notifications[0].label, "✅ 任务完成");
     assert.equal(notifications[0].tag, "dsh-task-notify:s1", "气泡按会话打成同一个 tag");
     assert.equal(notifications[0].requireInteraction, true, "气泡默认常驻：不点不自己滑走");
     assert.ok(String(notifications[0].body).includes("重构通知"), "气泡正文带会话标题");
-    assert.equal(fakeDocument.title, "(1) 我的工作台", "标签页标题加未读前缀（正看着的 s9 不算未读）");
+    assert.equal(notifications[1].tag, "dsh-task-notify:s9", "第二条是另一个会话，tag 各自独立");
+    assert.equal(fakeDocument.title, "(2) 我的工作台", "两条都算未读");
     assert.ok(tones.length > 0, "同时响提示音（beep 现场合成）");
     assert.deepEqual(asked[0].body, { since: 0 }, "第一轮用 since=0 拉全量");
     // 手工推进定时器：换一份 payload 再轮一次，游标应带着上一轮的 since=2 去问。
@@ -529,6 +530,27 @@ try {
     assert.deepEqual(notifications.map((one) => one.label), ["✅ 任务完成", "❌ 任务失败", "❓ 需要你选择"], "三种结束原因各一条");
     assert.equal(new Set(notifications.map((one) => one.tag)).size, 3, "三条 tag 不同，不会互相覆盖");
     assert.ok(String(notifications[1].body).includes("TypeError"), "失败预览带原因");
+    // 宿主推的预览（sessionId 为空）两条不能互相覆盖：tag 里要带 kind/seq。
+    const prevTab = loadExports([DESCRIBED, null, null, false, null, null], fakeWindow);
+    notifications.length = 0;
+    globalThis.fetch = async () => ({
+      status: 200,
+      text: async () => JSON.stringify({
+        ok: true,
+        value: {
+          since: 91,
+          alerts: [
+            { seq: 90, sessionId: "", kind: "completed", label: "✅ 任务完成", title: "t1", brief: "", ws: "预览" },
+            { seq: 91, sessionId: "", kind: "error", label: "❌ 任务失败", title: "t2", brief: "", ws: "预览" },
+          ],
+          desktop: { notice: true, badge: true, sound: "none" },
+        },
+      }),
+    });
+    prevTab.installDesktop(ctx);
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(notifications.length, 2, "宿主推的两条预览都要弹（以前同 tag 只留最后一条）");
+    assert.equal(new Set(notifications.map((one) => one.tag)).size, 2, "空 sessionId 时 tag 带 kind/seq，后一条不会顶掉前一条");
 
     for (const fn of listeners.window.focus ?? []) fn();
     assert.equal(fakeDocument.title, "我的工作台", "页面获得焦点后未读标记恢复");
