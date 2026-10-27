@@ -738,4 +738,48 @@ try {
     globalThis.setInterval = savedSetInterval;
   }
 }
+// 4h) 宿主直发原生气泡时（desktop.native=true），页面不再重复弹，但页内提示照旧
+{
+  const savedDoc = globalThis.document;
+  const savedFetch = globalThis.fetch;
+  const savedSetInterval = globalThis.setInterval;
+  const savedNotification = globalThis.Notification;
+  try {
+    const mkEl = (tag) => ({
+      tag, children: [], attrs: {}, textContent: "", parentNode: null,
+      setAttribute(key, value) { this.attrs[key] = value; },
+      appendChild(node) { this.children.push(node); node.parentNode = this; return node; },
+      removeChild(node) { this.children = this.children.filter((one) => one !== node); node.parentNode = null; return node; },
+    });
+    const body = mkEl("body");
+    globalThis.document = { body, documentElement: body, title: "工作台", visibilityState: "visible", createElement: mkEl, addEventListener: () => {} };
+    globalThis.setInterval = () => ({ unref() {} });
+    let notifications = 0;
+    function FakeNotification() { notifications += 1; this.close = () => {}; }
+    FakeNotification.permission = "granted";
+    globalThis.Notification = FakeNotification;
+    globalThis.fetch = async () => ({
+      status: 200,
+      text: async () => JSON.stringify({
+        ok: true,
+        value: { since: 1, epoch: "en1", alerts: [{ seq: 1, sessionId: "s1", kind: "completed", label: "✅ 任务完成", title: "改完了", brief: "两处都调好了", ws: "dsh-task-notify" }], desktop: { notice: true, badge: false, sound: "none", sticky: true, native: true } },
+      }),
+    });
+    const fakeWindow = {
+      addEventListener: () => {},
+      localStorage: { getItem: (key) => (String(key).indexOf("alertCursor") >= 0 ? JSON.stringify({ epoch: "en1", seq: 0 }) : null), setItem: () => {} },
+    };
+    const instance = loadExports([], fakeWindow);
+    instance.installDesktop({ on: () => {} });
+    await new Promise((resolve) => setTimeout(resolve, 20));
+    assert.equal(notifications, 0, "宿主已直发原生气泡，页面不能再弹自己那个（否则两条）");
+    const toasts = body.children.filter((node) => String(node.attrs && node.attrs.style).indexOf("position:fixed") >= 0);
+    assert.equal(toasts.length, 1, "页内提示仍然要有");
+  } finally {
+    globalThis.document = savedDoc;
+    globalThis.fetch = savedFetch;
+    globalThis.setInterval = savedSetInterval;
+    globalThis.Notification = savedNotification;
+  }
+}
 console.log("dsh-task-notify client selftest: ok");

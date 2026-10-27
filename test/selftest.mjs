@@ -19,6 +19,7 @@ process.env.DSH_STORAGES_DIR = NO_STORAGES;
 function makeCtx({ dshIm, sessionTitle } = {}) {
   // 每个假 ctx 一个独立账本：否则上一条用例的计数会被下一条读到（账本是跨重启累计的）。
   process.env.TASK_NOTIFY_LEDGER = join(mkdtempSync(join(tmpdir(), "task-notify-ledger-")), "ledger.jsonl");
+  process.env.TASK_NOTIFY_NO_NATIVE = "1"; // 自检不真弹系统气泡
   const listeners = new Map();
   const logs = [];
   const routes = new Map();
@@ -1397,6 +1398,7 @@ assert.equal(await withTimeout(Promise.resolve("done"), 50, "send"), "done", "�
   assert.equal(first.body.value.alerts[0].sessionId, "s1", "带上会话 id，点气泡才能跳过去");
   assert.equal(first.body.value.desktop.notice, true, "同时回带桌面开关");
   assert.equal(first.body.value.desktop.sound, "beep", "回带提示音设置");
+  assert.equal(first.body.value.desktop.native, process.platform === "win32", "Windows 上回带「宿主直发原生气泡」，页面就不重复弹");
   const cursor = first.body.value.since;
   assert.ok(cursor > 0, "返回游标");
 

@@ -81,6 +81,7 @@ IM 通知要经过微信/飞书，慢、还有 12 小时窗口这类坑；人就
 | 设置 | 缺省 | 作用 |
 | --- | --- | --- |
 | `desktopNotice` | `true` | 弹 Windows 系统原生通知（浏览器 Notification）。点气泡 → 回到页面并跳到那条会话 |
+| `nativeToast` | `true` | Windows **原生气泡**：由宿主直接调 PowerShell + WinRT 发出，不经过页面。便携版 Electron 没有注册 AppUserModelID，页面里的 `new Notification` 会被 Windows 静默丢掉——这条不受影响，窗口最小化、藏在后台也能弹；开着时页面不再重复弹自己那个 |
 | `noticeSticky` | `true` | 气泡常驻：置 `requireInteraction`，Windows 上要人点一下或关掉才消失，不会几秒自己滑走（系统「通知显示时长」/专注助手仍可能截断） |
 | `titleBadge` | `true` | 标签页标题前加未读标记，如 `(2) 我的工作台`；页面被激活查看后自动恢复 |
 | `sound` | `beep` | `none` / `beep` / `chime` / `custom`；beep 与 chime 是现场合成的，不需要音频文件 |
@@ -88,6 +89,7 @@ IM 通知要经过微信/飞书，慢、还有 12 小时窗口这类坑；人就
 
 行为细节：
 
+- **原生气泡走宿主，不依赖页面**：`nativeToast`（缺省开）在 Windows 上由宿主 `powershell.exe -EncodedCommand` → `Windows.UI.Notifications.ToastNotificationManager` 直接投递，借用系统已注册的 `Windows.SystemToast.Suggested` AUMID。这是「便携版 Electron 有声音、有页内提示、却没有 Windows 气泡」的根治手段（那类安装包没注册 AppUserModelID，页面里的 Notification 被系统丢弃）。关掉它就退回「只在页面里弹」。
 - **只在打开着 DSH Web 页面时有效**——气泡、提示音、标题标记都是浏览器能力，页面关着就只有 IM 通知（这是浏览器 API 的边界，不是漏做）。
 - **判定与 IM 投递完全同一套**：`enabled` → `skipSubagents` → `statuses` → `skipWhenWatching` → 去重 → `onlyWorkspaces`。宿主放行才产出提醒，客户端不再自己加一层「正在看就不弹」——不会出现「飞书发了、屏幕没弹」或反过来。
 - **气泡按会话合并、预览不合并**：真任务用 `tag = dsh-task-notify:<sessionId>`（同一会话只留最新一条）；`sessionId` 为空的预览/测试则带 `kind+seq`，几条各自独立、不会互相顶掉。
@@ -404,7 +406,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 | 任务中断了却没收到通知 | 多半是自动继续插件接手了：`error` / `interrupted` / `max-tokens` 会先等 `autoContinueGraceMs`，期间被 dsh-auto-continue 续跑接上就不推（`suppressed` 涨 1）。想无论如何都收到，把 `autoContinueGraceMs` 设为 `0`。 |
 | 同一个会话里第二轮起就收不到通知（v0.8.1 修） | 0.8.0 及以前的去重键只有「会话 + 结束原因」、漏了轮次，于是**一个会话只会推第一条**，之后每一轮都静默进 `deduped`（新建工作区里连跑几轮最明显：只看得到第一条）。0.8.1 起键里带 `turn`：每轮各推一条，同一轮的事件重放才吞。验法：同一个会话连跑两轮，`deduped` 不涨而 `notified` 按轮涨。 |
 | 某个工作区没通知、别的有 | 检查 `workspaces` 的键：先按完整 `cwd` 匹配、再按目录名匹配，两者都没命中才回落默认 `targets`。 |
-| 有提示音、但没有 Windows 气泡 | 提示音走 WebAudio，不受通知权限约束；气泡要 `Notification.permission === "granted"`。浏览器把通知授权按 **origin（协议+主机+端口）** 存，而 DSH 的 Web 端口每次启动都在换（19387 → 50002 → 53292 → …），换端口就是换网站，授权归零。页面右下角会出现一条「允许系统通知」提示条（被拒绝过则提示去地址栏站点设置改），点一下即可；不想每次都点就把 DSH 的 Web 端口固定（`--port <number>` 或环境变量 `PORT`）。 | 桌面版（Electron）下系统气泡还可能被 Windows 吞掉（专注助手 / 该应用通知关闭 / 外壳没有 AUMID 注册），所以插件同时在**页面右下角冒一条页内提示**（12 秒自动消失，点一下跳会话），它不依赖任何权限；桌面版里 Electron 对非麦克风权限直接放行，因此那条「允许系统通知」提示条只在浏览器里才会出现。
+| 有提示音、但没有 Windows 气泡 | 提示音走 WebAudio，不受通知权限约束；气泡要 `Notification.permission === "granted"`。浏览器把通知授权按 **origin（协议+主机+端口）** 存，而 DSH 的 Web 端口每次启动都在换（19387 → 50002 → 53292 → …），换端口就是换网站，授权归零。页面右下角会出现一条「允许系统通知」提示条（被拒绝过则提示去地址栏站点设置改），点一下即可；不想每次都点就把 DSH 的 Web 端口固定（`--port <number>` 或环境变量 `PORT`）。 | 桌面版（Electron）下系统气泡还可能被 Windows 吞掉（专注助手 / 该应用通知关闭 / 外壳没有 AUMID 注册），所以插件同时在**页面右下角冒一条页内提示**（12 秒自动消失，点一下跳会话），它不依赖任何权限；桌面版里 Electron 对非麦克风权限直接放行，因此那条「允许系统通知」提示条只在浏览器里才会出现。 桌面版先看 `nativeToast` 是否关着（缺省开，由宿主直发原生气泡）；仍不弹就查 Windows 侧：`设置 → 系统 → 通知` 里本应用是否允许、专注助手是否开着。页内提示（右下角卡片）不依赖任何权限，一定看得见。
 | 改了 repo 代码但行为没变 | pnpm 装进 profile 的是真实拷贝。重新跑上面的 install，或直接改 `node_modules\dsh-task-notify\lib\index.js`。 |
 | 设置里找不到 dsh-task-notify 的配置行 | 卡片挂在「插件 → 已安装」的**行配置**上，不是独立的设置页（宿主 rc.1 后只保留 `plugins.row.config` 这一个 slot）。若整行没有入口，先确认插件已挂载（状态路由 200）。 |
 | 卡片写着「桥未注册」 | 服务端没跑或版本对不上：`/api/dsh-task-notify-settings/describe` 是 404 就是桥没注册，先查 `/_task-notify/status` 是否 200。 |
