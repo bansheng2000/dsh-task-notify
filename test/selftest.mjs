@@ -1440,6 +1440,20 @@ assert.equal(await withTimeout(Promise.resolve("done"), 50, "send"), "done", "�
   const polled = await callBridge(ctx, BRIDGE + "/alerts", { method: "POST", body: { since: 0 } });
   assert.equal(polled.body.value.alerts.length, 1, "测试提醒进了增量信箱");
 
+  // 预览稿：能分别演示「完成 / 失败 / 要你选」，气泡上的文案跟着 kind 走。
+  const errPreview = await callBridge(ctx, BRIDGE + "/alerts/test", { method: "POST", body: { kind: "error" } });
+  const errAlert = errPreview.body.value.alerts[errPreview.body.value.alerts.length - 1];
+  assert.equal(errAlert.kind, "error", "预览稿带上它模拟的事件类型");
+  assert.equal(errAlert.label, "❌ 任务失败", "失败预览用失败文案");
+  assert.ok(String(errAlert.brief).length > 0, "失败预览带一句原因");
+  const askPreview = await callBridge(ctx, BRIDGE + "/alerts/test", { method: "POST", body: { kind: "question" } });
+  const askAlert = askPreview.body.value.alerts[askPreview.body.value.alerts.length - 1];
+  assert.equal(askAlert.kind, "question", "问句预览的 kind");
+  assert.equal(askAlert.label, "❓ 需要你选择", "问句预览用提问文案");
+  const donePreview = await callBridge(ctx, BRIDGE + "/alerts/test", { method: "POST", body: { kind: "completed" } });
+  const doneAlert = donePreview.body.value.alerts[donePreview.body.value.alerts.length - 1];
+  assert.equal(doneAlert.label, "✅ 任务完成", "完成预览用完成文案");
+
   const status = await callBridge(ctx, "/_task-notify/status", { method: "GET" });
   assert.ok(status.body.alerts.polls >= 3, "轮询次数记在 status 里（区分「没产出」和「页面没在轮询」）");
 }

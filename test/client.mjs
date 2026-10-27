@@ -517,6 +517,19 @@ try {
     await tick();
     assert.deepEqual(legacyAsked[legacyAsked.length - 1], { since: 2 }, "编号倒退（宿主重启）时游标跟着退回去，不再卡死");
 
+    // 「试一下桌面提醒」= 本地连发三条预览（完成 / 失败 / 需要选择），不依赖宿主版本。
+    const cardTab = loadExports([DESCRIBED, null, null, false, null, null], fakeWindow);
+    notifications.length = 0;
+    const previewBtn = walk(cardTab.NotifyCard({}))
+      .find((node) => node.type === "button" && node.props?.children === "试一下桌面提醒");
+    assert.ok(previewBtn, "卡片上有「试一下桌面提醒」");
+    previewBtn.props.onClick();
+    await new Promise((resolve) => setTimeout(resolve, 2100));
+    assert.equal(notifications.length, 3, "一次点击弹三条预览");
+    assert.deepEqual(notifications.map((one) => one.label), ["✅ 任务完成", "❌ 任务失败", "❓ 需要你选择"], "三种结束原因各一条");
+    assert.equal(new Set(notifications.map((one) => one.tag)).size, 3, "三条 tag 不同，不会互相覆盖");
+    assert.ok(String(notifications[1].body).includes("TypeError"), "失败预览带原因");
+
     for (const fn of listeners.window.focus ?? []) fn();
     assert.equal(fakeDocument.title, "我的工作台", "页面获得焦点后未读标记恢复");
 
