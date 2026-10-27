@@ -617,4 +617,83 @@ try {
   assert.ok(keys[0].includes("weixin") && keys[0].includes("tgt_1a2b3c4d5e6f7890"), "第一行的 key 带上渠道与 targetId");
   assert.ok(keys[1].includes("telegram"), "第二行的 key 跟着内容走");
 }
+// 4f) 权限一键条：DSH 换端口 = 换 origin = 通知授权掉了，页面上得有一条能点一下重给
+{
+  const savedDoc = globalThis.document;
+  const savedNotif = globalThis.Notification;
+  const savedFetch = globalThis.fetch;
+  try {
+    const mkEl = (tag) => ({
+      tag, children: [], attrs: {}, textContent: "", parentNode: null,
+      setAttribute(key, value) { this.attrs[key] = value; },
+      appendChild(node) { this.children.push(node); node.parentNode = this; return node; },
+      removeChild(node) { this.children = this.children.filter((one) => one !== node); node.parentNode = null; return node; },
+    });
+    const body = mkEl("body");
+    const fakeDoc = {
+      body, title: "", visibilityState: "visible", documentElement: body,
+      createElement: mkEl, addEventListener: () => {}, removeEventListener: () => {},
+    };
+    const bars = () => body.children.filter((node) => node.id === "dsh-task-notify-perm");
+    const flatText = (node) => [node.textContent, ...node.children.map(flatText)].join(" ");
+    const buttons = (node) => {
+      const out = [];
+      const visit = (one) => { for (const child of one.children ?? []) { if (child.tag === "button") out.push(child); visit(child); } };
+      visit(node);
+      return out;
+    };
+    const fakeWindow = { addEventListener: () => {}, removeEventListener: () => {} };
+
+    const boot = async (permission, desktopNotice) => {
+      globalThis.document = fakeDoc;
+      globalThis.location = { origin: "http://127.0.0.1:57592" };
+      body.children.length = 0;
+      class FakeNotification {
+        static permission = permission;
+        static requestPermission(callback) { FakeNotification.permission = "granted"; if (callback) callback("granted"); return Promise.resolve("granted"); }
+      }
+      globalThis.Notification = FakeNotification;
+      globalThis.fetch = async () => ({
+        status: 200,
+        text: async () => JSON.stringify({ ok: true, value: { ns: "task-notify", config: { desktopNotice }, stats: {} } }),
+      });
+      const instance = loadExports([], fakeWindow);
+      instance.installPermissionBar({ on: () => {} });
+      await new Promise((resolve) => setTimeout(resolve, 10));
+      return instance;
+    };
+
+    // ① 未授权（default）：一条提示 + 「允许系统通知」按钮，点一下就授权并把条子收掉
+    await boot("default", true);
+    assert.equal(bars().length, 1, "没授权时页面上要出现权限条");
+    assert.match(flatText(bars()[0]), /允许系统通知/, "提示里要有那一步动作");
+    assert.match(flatText(bars()[0]), /127\.0\.0\.1|origin|·/, "提示里带上当前地址，用户才知道是哪个 origin 掉了");
+    const allow = buttons(bars()[0]).find((node) => node.textContent === "允许系统通知");
+    assert.ok(allow, "缺授权时要有「允许系统通知」按钮");
+    allow.onclick();
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    assert.equal(bars().length, 0, "授权成功后条子要自己消失");
+
+    // ② 已被拒绝：不装按钮（点了也不会再弹框），只告诉用户去哪改
+    await boot("denied", true);
+    assert.equal(bars().length, 1, "被拒绝时也要提示，否则用户根本不知道");
+    assert.match(flatText(bars()[0]), /站点图标/, "被拒绝只能去站点设置改，提示必须指路");
+    assert.equal(buttons(bars()[0]).some((node) => node.textContent === "允许系统通知"), false, "denied 状态下再点 requestPermission 浏览器不会弹框，别给假按钮");
+    const later = buttons(bars()[0]).find((node) => node.textContent === "以后再说");
+    assert.ok(later, "要能关掉，别一直挡着");
+    later.onclick();
+    assert.equal(bars().length, 0, "「以后再说」关掉就走人");
+
+    // ③ 已授权 / 卡片里关了系统通知：都不该出现
+    await boot("granted", true);
+    assert.equal(bars().length, 0, "已授权就不要打扰");
+    await boot("default", false);
+    assert.equal(bars().length, 0, "卡片里关掉「系统通知」就不该再提示授权");
+  } finally {
+    globalThis.document = savedDoc;
+    globalThis.Notification = savedNotif;
+    globalThis.fetch = savedFetch;
+    delete globalThis.location;
+  }
+}
 console.log("dsh-task-notify client selftest: ok");

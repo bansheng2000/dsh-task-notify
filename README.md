@@ -404,6 +404,7 @@ curl http://127.0.0.1:19387/api/dsh-task-notify-settings/describe
 | 任务中断了却没收到通知 | 多半是自动继续插件接手了：`error` / `interrupted` / `max-tokens` 会先等 `autoContinueGraceMs`，期间被 dsh-auto-continue 续跑接上就不推（`suppressed` 涨 1）。想无论如何都收到，把 `autoContinueGraceMs` 设为 `0`。 |
 | 同一个会话里第二轮起就收不到通知（v0.8.1 修） | 0.8.0 及以前的去重键只有「会话 + 结束原因」、漏了轮次，于是**一个会话只会推第一条**，之后每一轮都静默进 `deduped`（新建工作区里连跑几轮最明显：只看得到第一条）。0.8.1 起键里带 `turn`：每轮各推一条，同一轮的事件重放才吞。验法：同一个会话连跑两轮，`deduped` 不涨而 `notified` 按轮涨。 |
 | 某个工作区没通知、别的有 | 检查 `workspaces` 的键：先按完整 `cwd` 匹配、再按目录名匹配，两者都没命中才回落默认 `targets`。 |
+| 有提示音、但没有 Windows 气泡 | 提示音走 WebAudio，不受通知权限约束；气泡要 `Notification.permission === "granted"`。浏览器把通知授权按 **origin（协议+主机+端口）** 存，而 DSH 的 Web 端口每次启动都在换（19387 → 50002 → 53292 → …），换端口就是换网站，授权归零。页面右下角会出现一条「允许系统通知」提示条（被拒绝过则提示去地址栏站点设置改），点一下即可；不想每次都点就把 DSH 的 Web 端口固定（`--port <number>` 或环境变量 `PORT`）。 |
 | 改了 repo 代码但行为没变 | pnpm 装进 profile 的是真实拷贝。重新跑上面的 install，或直接改 `node_modules\dsh-task-notify\lib\index.js`。 |
 | 设置里找不到 dsh-task-notify 的配置行 | 卡片挂在「插件 → 已安装」的**行配置**上，不是独立的设置页（宿主 rc.1 后只保留 `plugins.row.config` 这一个 slot）。若整行没有入口，先确认插件已挂载（状态路由 200）。 |
 | 卡片写着「桥未注册」 | 服务端没跑或版本对不上：`/api/dsh-task-notify-settings/describe` 是 404 就是桥没注册，先查 `/_task-notify/status` 是否 200。 |
